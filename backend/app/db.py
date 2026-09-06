@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 SCHEMA = """
@@ -74,7 +75,7 @@ def connect(database_path: Path) -> sqlite3.Connection:
 
 def initialize(database_path: Path) -> None:
     database_path.parent.mkdir(parents=True, exist_ok=True)
-    with connect(database_path) as connection:
+    with closing(connect(database_path)) as connection, connection:
         connection.execute("PRAGMA journal_mode = WAL")
         connection.executescript(SCHEMA)
         case_columns = {

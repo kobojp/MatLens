@@ -17,6 +17,7 @@ MatLens 是供 Windows 10／11 使用的消防材料更換照片整理與案件�
 - Frontend tests：Vitest、Testing Library
 - Python lint：Ruff
 - 執行平台：Windows 10／11、PowerShell
+- 桌面視窗：pywebview（Edge WebView2）；打包：PyInstaller x64
 
 ## 專案結構
 
@@ -26,6 +27,9 @@ MatLens/
 ├─ frontend/src/      React 使用者介面
 ├─ frontend/dist/     正式前端建置結果，由 FastAPI 提供
 ├─ tests/             後端 API 與儲存測試
+├─ desktop/           桌面入口、單一實例、本機服務與資料接續
+├─ packaging/         EXE／ZIP 建置與捷徑安裝腳本
+├─ docs/              桌面驗證與交付說明
 ├─ data/              執行時 SQLite 與預設照片目錄
 ├─ pyproject.toml     Python 專案與 Ruff／pytest 設定
 ├─ uv.lock            Python 鎖定依賴
@@ -43,6 +47,10 @@ MatLens/
 - 刪除自訂快速選項不得刪除或改寫既有案件資料。
 - 內建材料與問題選項受到保護，不可由一般刪除功能移除。
 - 任何具破壞性的資料操作都必須先確認精確目標與使用者授權。
+- 桌面資料庫位於 `%LOCALAPPDATA%/MatLens/`，必須與安裝檔案分離。
+- 接續舊資料前使用 SQLite backup 建立一致性快照，不覆蓋已有桌面資料庫。
+- 桌面版與舊網頁版使用獨立資料庫，不能假設兩者自動同步。
+- 桌面內部服務僅綁定 loopback 隨機埠，保留 session cookie、Host 與 Origin 檢查。
 
 ## Python 與 uv 規則
 

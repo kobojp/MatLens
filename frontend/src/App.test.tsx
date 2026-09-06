@@ -51,6 +51,17 @@ describe("照片拖放", () => {
 
     await waitFor(() => expect(screen.getByText("second.jpg")).toBeInTheDocument());
     expect(screen.getByText("2 張")).toBeInTheDocument();
+    expect(window.matlensDesktopState?.dirty).toBe(true);
+  });
+
+  it("桌面版辨識未儲存欄位，並阻止拖放圖片導致頁面離開", async () => {
+    render(<App />);
+    expect(window.matlensDesktopState?.dirty).toBe(false);
+    fireEvent.change(screen.getByPlaceholderText("例如 3F、B2"), { target: { value: "3F" } });
+    expect(window.matlensDesktopState?.dirty).toBe(true);
+    const dropped = new Event("drop", { bubbles: true, cancelable: true });
+    document.dispatchEvent(dropped);
+    expect(dropped.defaultPrevented).toBe(true);
   });
 
   it("可新增並立即選用自訂材料", async () => {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import PhotoPreview from "./PhotoPreview";
 
 type ReferenceValues = {
   buildings: string[];
@@ -127,6 +128,36 @@ export default function App() {
   const [deletingOption, setDeletingOption] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
   const latestPhotos = useRef<PhotoDraft[]>([]);
+  const draftFields = JSON.stringify({ workDate, building, floor, addressCode, material, issues, location, notes });
+  const cleanFields = useRef(draftFields);
+  const stateSequence = useRef(0);
+
+  useEffect(() => {
+    window.matlensDesktopState = {
+      dirty: photos.length > 0 || draftFields !== cleanFields.current,
+      saving,
+    };
+    const sendState = () => {
+      const state = window.matlensDesktopState!;
+      stateSequence.current = Math.max(stateSequence.current + 1, Date.now() * 1000);
+      window.pywebview?.api.update_state(stateSequence.current, state.dirty, state.saving)
+        .catch(() => setError("無法同步桌面儲存狀態，請先完成儲存再關閉程式。"));
+    };
+    sendState();
+    window.addEventListener("pywebviewready", sendState);
+    return () => window.removeEventListener("pywebviewready", sendState);
+  }, [photos.length, draftFields, saving]);
+
+  useEffect(() => {
+    const preventFileNavigation = (event: DragEvent) => event.preventDefault();
+    document.addEventListener("dragover", preventFileNavigation);
+    document.addEventListener("drop", preventFileNavigation);
+    return () => {
+      document.removeEventListener("dragover", preventFileNavigation);
+      document.removeEventListener("drop", preventFileNavigation);
+      delete window.matlensDesktopState;
+    };
+  }, []);
 
   const selectedIndex = photos.findIndex((photo) => photo.id === selectedPhotoId);
   const selectedPhoto = selectedIndex >= 0 ? photos[selectedIndex] : photos[0];
@@ -245,6 +276,7 @@ export default function App() {
   }
 
   function clearDraft() {
+    cleanFields.current = JSON.stringify({ workDate, building, floor: "", addressCode: "", material, issues, location: "", notes: "" });
     photos.forEach((photo) => URL.revokeObjectURL(photo.url));
     setPhotos([]);
     setSelectedPhotoId("");
@@ -508,13 +540,13 @@ export default function App() {
               <div><span className="eyebrow">STEP 2</span><h2>照片預覽與命名</h2></div>
               {selectedPhoto && <span className="role-label">{selectedPhoto.role}</span>}
             </div>
-            <div className="image-stage">
-              {selectedPhoto ? (
-                <img src={selectedPhoto.url} alt={selectedPhoto.file.name} />
-              ) : (
+            {selectedPhoto ? (
+              <PhotoPreview key={selectedPhoto.id} src={selectedPhoto.url} alt={selectedPhoto.file.name} />
+            ) : (
+              <div className="image-stage">
                 <div className="empty-preview"><span>尚未匯入照片</span><small>照片會在這裡放大預覽</small></div>
-              )}
-            </div>
+              </div>
+            )}
             {selectedPhoto && (
               <div className="role-editor">
                 <label htmlFor="photo-role">這張照片是</label>

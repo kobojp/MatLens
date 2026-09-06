@@ -5,6 +5,7 @@ import os
 import sqlite3
 import subprocess
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -40,6 +41,7 @@ def create_app(
     database_path: Path = DATABASE_PATH,
     photo_root: Path = PHOTO_ROOT,
     frontend_dist: Path = FRONTEND_DIST,
+    folder_picker: Callable[[str], str | None] | None = None,
 ) -> FastAPI:
     initialize(database_path)
     photo_root.mkdir(parents=True, exist_ok=True)
@@ -150,6 +152,14 @@ def create_app(
 
     @app.post("/api/settings/storage/pick-folder")
     def pick_storage_folder() -> dict[str, object]:
+        if folder_picker is not None:
+            try:
+                selected = folder_picker(str(active_storage_root()))
+            except Exception as error:
+                raise HTTPException(status_code=500, detail="無法開啟資料夾選擇器") from error
+            if not selected:
+                return {"path": str(active_storage_root()), "cancelled": True}
+            return {"path": str(configure_storage_root(selected)), "cancelled": False}
         if os.name != "nt":
             raise HTTPException(status_code=501, detail="資料夾選擇器僅支援 Windows")
         environment = os.environ.copy()
@@ -314,4 +324,10 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     return app
 
 
-app = create_app()
+def __getattr__(name: str) -> FastAPI:
+    # Keep main:app compatible without creating a database when importing the factory.
+    if name == "app":
+        instance = create_app()
+        globals()[name] = instance
+        return instance
+    raise AttributeError(name)

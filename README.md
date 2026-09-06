@@ -6,6 +6,8 @@
 
 - 一次匯入或拖放多張 JPG、PNG、WebP 照片。
 - 大圖預覽，以及「前／中／完成／樓層／位置／設備標籤」快速分類。
+- 預覽預設完整顯示；滾輪或 ＋／− 縮放、左鍵拖曳平移、雙擊或「顯示完整圖片」還原。
+  縮放範圍 25%～800%（相對完整顯示比例）；切換照片自動還原。
 - 記錄維修日期、棟別、樓層、定址碼、材料、問題、位置及備註。
 - 材料與問題提供快速選項；問題可複選，兩者都能新增及刪除自訂選項（內建選項受保護）。
 - 依規則自動建立年份、月份、材料與案件資料夾。
@@ -18,6 +20,43 @@
 - 所有匯入均採複製方式，不修改來源照片。
 
 ## Windows 執行
+
+### 桌面版（Windows 10／11 x64）
+
+解壓縮 `MatLens-0.2.0-win-x64.zip` 後：
+
+- 直接雙擊 `MatLens/MatLens.exe` 啟動免安裝版，必須保留整個資料夾。
+- 或雙擊 `Install-MatLens.cmd` 安裝至使用者程式目錄並建立桌面／開始選單捷徑。
+- 使用者不必安裝 Python、uv 或 Node.js；需要 Microsoft Edge WebView2 Runtime。
+- 已有 WebView2 的電腦可離線使用。缺少時可從 [Microsoft 官方網站](https://developer.microsoft.com/microsoft-edge/webview2/) 安裝 Evergreen Runtime。
+
+桌面版資料庫存於 `%LOCALAPPDATA%/MatLens/matlens.db`，紀錄位於同目錄的 `logs/`。
+照片目錄可自訂；更新安裝不會清除案件或照片。
+第一次從原始碼啟動時，會備份並複製專案 `data/matlens.db`，保留原照片路徑。
+之後桌面版與舊網頁版的案件資料各自獨立，不會雙向同步；完成轉換後請統一使用桌面版。
+在其他位置首次啟動時，可指定舊資料庫（目的地已有資料時會拒絕覆蓋）：
+
+```powershell
+.\MatLens.exe --import-from "D:\舊版MatLens\data\matlens.db"
+```
+
+開發啟動（仍使用 uv 虛擬環境）：
+
+```powershell
+PowerShell -ExecutionPolicy Bypass -File .\run-desktop.ps1
+```
+
+產生 EXE 與 ZIP：
+
+```powershell
+PowerShell -ExecutionPolicy Bypass -File .\packaging\build.ps1
+```
+
+`packaging/MatLens.iss` 另提供 Inno Setup 6 安裝設定，已安裝編譯器後可加 `-Installer`。
+目前交付物是免安裝 ZIP 與捷徑安裝腳本；Inno Setup 安裝包尚未驗證。
+測試範圍與限制請見 [桌面驗證紀錄](docs/desktop-validation.md)。
+
+### 原有網頁版
 
 需要先安裝：
 
@@ -82,6 +121,9 @@ npm --prefix frontend run build
 MatLens/
 ├─ backend/app/       FastAPI、SQLite 與照片儲存
 ├─ frontend/src/      React 操作介面
+├─ desktop/           Windows 桌面入口、視窗與資料接續
+├─ packaging/         EXE／ZIP 建置與安裝腳本
+├─ docs/              驗證紀錄
 ├─ tests/             API 與照片儲存測試
 ├─ data/              執行後建立的本機資料
 ├─ pyproject.toml     uv 專案與 Python 依賴
