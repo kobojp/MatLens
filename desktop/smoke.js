@@ -34,6 +34,11 @@
                  'sequential drop');
     }
     await wait(() => document.querySelector('.image-stage img')?.naturalWidth === 800, 'preview');
+    await wait(() => document.querySelector('select[aria-label="月份資料夾"]')?.value, 'storage scan');
+    if (!document.querySelector('select[aria-label="儲存子目錄"]')?.value) {
+      document.querySelector('.folder-custom-row button').click();
+      await wait(() => document.querySelector('select[aria-label="儲存子目錄"]')?.value, 'create storage folders');
+    }
     const stage = document.querySelector('.interactive-preview');
     const preview = stage.querySelector('img');
     const bounds = stage.getBoundingClientRect();

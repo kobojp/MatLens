@@ -26,13 +26,20 @@ from .config import (
     PHOTO_ROOT,
 )
 from .db import connect, get_setting, initialize, set_setting
-from .schemas import CaseCreate, CustomOptionCreate, StorageSettingsUpdate
+from .schemas import (
+    CaseCreate,
+    CustomOptionCreate,
+    StorageFoldersCreate,
+    StorageSettingsUpdate,
+)
 from .storage import (
     DuplicatePhotoError,
     StorageError,
     create_case,
+    create_storage_folders,
     get_case,
     list_cases,
+    scan_storage_tree,
 )
 
 
@@ -150,6 +157,26 @@ def create_app(
     def update_storage_settings(settings: StorageSettingsUpdate) -> dict[str, str]:
         return {"path": str(configure_storage_root(settings.path))}
 
+    @app.get("/api/settings/storage/tree")
+    def storage_tree(work_date: str = Query(...)) -> dict[str, object]:
+        try:
+            parsed_date = datetime.strptime(work_date, "%Y-%m-%d")
+            target_month = f"{parsed_date.month}月"
+            return scan_storage_tree(active_storage_root(), target_month)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail="日期格式不正確") from error
+        except StorageError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @app.post("/api/settings/storage/folders", status_code=201)
+    def add_storage_folders(settings: StorageFoldersCreate) -> dict[str, object]:
+        try:
+            return create_storage_folders(
+                active_storage_root(), settings.month, settings.subfolders
+            )
+        except StorageError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
     @app.post("/api/settings/storage/pick-folder")
     def pick_storage_folder() -> dict[str, object]:
         if folder_picker is not None:
@@ -228,6 +255,8 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         location: str = Form(default=""),
         notes: str = Form(default=""),
         photo_roles: str = Form(...),
+        storage_month: str = Form(...),
+        storage_subfolder: str = Form(...),
         photos: list[UploadFile] = File(...),
     ) -> dict[str, object]:
         try:
@@ -255,6 +284,8 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
                 case=case,
                 uploads=photos,
                 roles=[str(role) for role in parsed_roles],
+                storage_month=storage_month,
+                storage_subfolder=storage_subfolder,
             )
         except DuplicatePhotoError as error:
             raise HTTPException(

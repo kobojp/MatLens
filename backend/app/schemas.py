@@ -33,6 +33,24 @@ class StorageSettingsUpdate(BaseModel):
     path: str = Field(min_length=1, max_length=500)
 
 
+class StorageFoldersCreate(BaseModel):
+    month: str = Field(min_length=1, max_length=80)
+    subfolders: list[str] = Field(min_length=1, max_length=20)
+
+    @field_validator("month")
+    @classmethod
+    def normalize_month(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("subfolders")
+    @classmethod
+    def normalize_subfolders(cls, values: list[str]) -> list[str]:
+        cleaned = list(dict.fromkeys(value.strip() for value in values if value.strip()))
+        if not cleaned:
+            raise ValueError("至少需要一個子目錄")
+        return cleaned
+
+
 class CustomOptionCreate(BaseModel):
     value: str = Field(min_length=1, max_length=40)
 

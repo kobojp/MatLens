@@ -43,6 +43,18 @@ type CaseRecord = {
   photos?: SavedPhoto[];
 };
 
+type StorageMonth = {
+  name: string;
+  subfolders: string[];
+};
+
+type StorageTree = {
+  root: string;
+  target_month: string;
+  month_exists: boolean;
+  months: StorageMonth[];
+};
+
 type CustomOptionKind = "material" | "issue";
 
 const FALLBACK_REFERENCES: ReferenceValues = {
@@ -124,6 +136,14 @@ export default function App() {
   const [dragging, setDragging] = useState(false);
   const [storageRoot, setStorageRoot] = useState("");
   const [choosingStorage, setChoosingStorage] = useState(false);
+  const [storageTree, setStorageTree] = useState<StorageTree | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState("");
+  const [selectedSubfolder, setSelectedSubfolder] = useState("");
+  const [loadingFolders, setLoadingFolders] = useState(false);
+  const [creatingFolders, setCreatingFolders] = useState(false);
+  const [showFolderCreator, setShowFolderCreator] = useState(false);
+  const [folderPresets, setFolderPresets] = useState<string[]>(["底座", "探頭"]);
+  const [customFolderName, setCustomFolderName] = useState("");
   const [customOptionKind, setCustomOptionKind] = useState<CustomOptionKind | null>(null);
   const [customOptionValue, setCustomOptionValue] = useState("");
   const [savingCustomOption, setSavingCustomOption] = useState(false);
@@ -166,11 +186,12 @@ export default function App() {
   const generatedNames = useMemo(() => roleFileNames(photos), [photos]);
 
   const folderPreview = useMemo(() => {
-    const [year, month] = workDate.split("-");
     const issueText = issues.map(safeName).join("-");
     const folder = [workDate, building, floor, addressCode, issueText].map(safeName).join("_");
-    return `${year || "年份"}\\${month || "月份"}月\\${safeName(material)}\\${folder}`;
-  }, [workDate, building, floor, addressCode, material, issues]);
+    return `${selectedMonth || "請選月份"}\\${selectedSubfolder || "請選子目錄"}\\${folder}`;
+  }, [workDate, building, floor, addressCode, issues, selectedMonth, selectedSubfolder]);
+
+  const selectedMonthEntry = storageTree?.months.find((item) => item.name === selectedMonth);
 
   const missingRoles = ["前", "中", "完成"].filter(
     (role) => !photos.some((photo) => photo.role === role),
@@ -191,6 +212,38 @@ export default function App() {
     }
   }, [query, caseBuilding, caseMaterial]);
 
+  const loadStorageTree = useCallback(async (
+    date: string,
+    preferredMonth = "",
+    preferredSubfolder = "",
+    preferredMaterial = "",
+  ) => {
+    setLoadingFolders(true);
+    try {
+      const response = await fetch(`/api/settings/storage/tree?work_date=${encodeURIComponent(date)}`);
+      const payload = (await response.json()) as StorageTree;
+      if (!response.ok) throw new Error(errorText(payload));
+      setStorageTree(payload);
+      const monthName = preferredMonth || payload.target_month;
+      const month = payload.months.find((item) => item.name === monthName);
+      const subfolder = month?.subfolders.includes(preferredSubfolder)
+        ? preferredSubfolder
+        : month?.subfolders.includes(preferredMaterial)
+          ? preferredMaterial
+          : month?.subfolders[0] ?? "";
+      setSelectedMonth(monthName);
+      setSelectedSubfolder(subfolder);
+      setShowFolderCreator(!month || !month.subfolders.length);
+    } catch (treeError) {
+      setStorageTree(null);
+      setSelectedMonth("");
+      setSelectedSubfolder("");
+      setError(treeError instanceof Error ? treeError.message : "無法掃描儲存目錄。");
+    } finally {
+      setLoadingFolders(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetch("/api/reference-values")
       .then((response) => (response.ok ? response.json() : Promise.reject()))
@@ -208,6 +261,10 @@ export default function App() {
       .then((payload: { path: string }) => setStorageRoot(payload.path))
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    if (storageRoot) void loadStorageTree(workDate, "", "", material);
+  }, [storageRoot, workDate, loadStorageTree]);
 
   useEffect(() => {
     const timer = window.setTimeout(loadCases, 200);
@@ -299,6 +356,10 @@ export default function App() {
       setError("請加入照片，並填寫樓層與定址碼。");
       return;
     }
+    if (!selectedMonthEntry || !selectedSubfolder) {
+      setError("請先選擇已存在的月份資料夾與子目錄。");
+      return;
+    }
     setSaving(true);
     const form = new FormData();
     form.set("work_date", workDate);
@@ -310,6 +371,8 @@ export default function App() {
     form.set("location", location);
     form.set("notes", notes);
     form.set("photo_roles", JSON.stringify(photos.map((photo) => photo.role)));
+    form.set("storage_month", selectedMonth);
+    form.set("storage_subfolder", selectedSubfolder);
     photos.forEach((photo) => form.append("photos", photo.file, photo.file.name));
     try {
       const response = await fetch("/api/cases", { method: "POST", body: form });
@@ -353,6 +416,52 @@ export default function App() {
       setError(storageError instanceof Error ? storageError.message : "無法設定儲存目錄。");
     } finally {
       setChoosingStorage(false);
+    }
+  }
+
+  function chooseMonth(monthName: string) {
+    const month = storageTree?.months.find((item) => item.name === monthName);
+    setSelectedMonth(monthName);
+    setSelectedSubfolder(
+      month?.subfolders.includes(material) ? material : month?.subfolders[0] ?? "",
+    );
+    setShowFolderCreator(!month || !month.subfolders.length);
+  }
+
+  function toggleFolderPreset(name: string) {
+    setFolderPresets((current) => (
+      current.includes(name)
+        ? current.filter((item) => item !== name)
+        : [...current, name]
+    ));
+  }
+
+  async function createFolders() {
+    const customName = customFolderName.trim();
+    const subfolders = [...new Set([...folderPresets, ...(customName ? [customName] : [])])];
+    if (!selectedMonth || !subfolders.length) {
+      setError("請至少選擇或輸入一個子目錄名稱。");
+      return;
+    }
+    setError("");
+    setCreatingFolders(true);
+    try {
+      const response = await fetch("/api/settings/storage/folders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ month: selectedMonth, subfolders }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(errorText(payload));
+      const preferred = customName || (subfolders.includes(material) ? material : subfolders[0]);
+      setCustomFolderName("");
+      setShowFolderCreator(false);
+      await loadStorageTree(workDate, selectedMonth, preferred, material);
+      setNotice(`${selectedMonth}及子目錄已準備完成。`);
+    } catch (folderError) {
+      setError(folderError instanceof Error ? folderError.message : "無法建立資料夾。");
+    } finally {
+      setCreatingFolders(false);
     }
   }
 
@@ -574,6 +683,90 @@ export default function App() {
               <div><span className="eyebrow">STEP 3</span><h2>案件資料</h2></div>
               <span className="autosave-label">常用選項</span>
             </div>
+            <fieldset className="storage-destination">
+              <legend>案件儲存位置</legend>
+              <div className="destination-selects">
+                <label>
+                  <span>月份資料夾</span>
+                  <select
+                    aria-label="月份資料夾"
+                    value={selectedMonth}
+                    disabled={loadingFolders || !storageTree}
+                    onChange={(event) => chooseMonth(event.target.value)}
+                  >
+                    {[...new Set([
+                      ...(storageTree?.target_month ? [storageTree.target_month] : []),
+                      ...(storageTree?.months.map((item) => item.name) ?? []),
+                    ])].map((name) => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>子目錄</span>
+                  <select
+                    aria-label="儲存子目錄"
+                    value={selectedSubfolder}
+                    disabled={loadingFolders || !selectedMonthEntry?.subfolders.length}
+                    onChange={(event) => setSelectedSubfolder(event.target.value)}
+                  >
+                    {!selectedMonthEntry?.subfolders.length && <option value="">尚無子目錄</option>}
+                    {selectedMonthEntry?.subfolders.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="scan-button"
+                  disabled={loadingFolders}
+                  onClick={() => loadStorageTree(workDate, selectedMonth, selectedSubfolder, material)}
+                >
+                  {loadingFolders ? "掃描中…" : "重新掃描"}
+                </button>
+              </div>
+
+              {!selectedMonthEntry && storageTree && (
+                <div className="folder-warning" role="status">
+                  找不到「{selectedMonth}」資料夾，請先選擇要一起建立的子目錄。
+                </div>
+              )}
+
+              {(showFolderCreator || !selectedMonthEntry) ? (
+                <div className="folder-creator">
+                  <span>常用子目錄（可複選）</span>
+                  <div className="folder-presets">
+                    {references.materials.map((name) => (
+                      <label key={name}>
+                        <input
+                          type="checkbox"
+                          checked={folderPresets.includes(name)}
+                          onChange={() => toggleFolderPreset(name)}
+                        />
+                        {name}
+                      </label>
+                    ))}
+                  </div>
+                  <div className="folder-custom-row">
+                    <input
+                      aria-label="自訂子目錄名稱"
+                      maxLength={80}
+                      value={customFolderName}
+                      onChange={(event) => setCustomFolderName(event.target.value)}
+                      placeholder="例如 模組、其他設備"
+                    />
+                    <button type="button" disabled={creatingFolders} onClick={createFolders}>
+                      {creatingFolders ? "建立中…" : `建立 ${selectedMonth || "月份"}與子目錄`}
+                    </button>
+                    {selectedMonthEntry && (
+                      <button type="button" onClick={() => setShowFolderCreator(false)}>取消</button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <button type="button" className="add-folder-button" onClick={() => setShowFolderCreator(true)}>
+                  ＋ 新增子目錄
+                </button>
+              )}
+            </fieldset>
             <div className="field-grid">
               <label><span>維修日期</span><input type="date" value={workDate} onChange={(event) => setWorkDate(event.target.value)} required /></label>
               <label><span>樓層</span><input value={floor} onChange={(event) => setFloor(event.target.value)} placeholder="例如 3F、B2" required /></label>

@@ -12,6 +12,15 @@ const references = {
   custom_issues: [],
 };
 
+const currentMonth = `${new Date().getMonth() + 1}月`;
+
+const storageTree = {
+  root: "C:\\MatLens照片",
+  target_month: currentMonth,
+  month_exists: true,
+  months: [{ name: currentMonth, subfolders: ["底座", "探頭"] }],
+};
+
 describe("照片拖放", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -24,7 +33,9 @@ describe("照片拖放", () => {
           ? { type: "issue", value: "壓力不足" }
           : url.includes("reference-values")
             ? references
-            : url.includes("settings/storage")
+            : url.includes("settings/storage/tree")
+              ? storageTree
+              : url.includes("settings/storage")
               ? { path: "C:\\MatLens照片" }
               : { items: [], total: 0 };
       return { ok: true, json: async () => payload } as Response;
@@ -93,5 +104,54 @@ describe("照片拖放", () => {
 
     await waitFor(() => expect(screen.queryByRole("button", { name: "消防泵" })).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: "底座" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("依日期預選月份並列出掃描到的子目錄", async () => {
+    render(<App />);
+
+    await waitFor(() => (
+      expect(screen.getByRole("combobox", { name: "月份資料夾" })).toHaveValue(currentMonth)
+    ));
+    expect(screen.getByRole("combobox", { name: "儲存子目錄" })).toHaveValue("底座");
+    expect(screen.getAllByText(new RegExp(`${currentMonth}\\\\底座`))).toHaveLength(2);
+  });
+
+  it("月份不存在時可批次建立常用與自訂子目錄", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const requestedMonth = url.includes("2026-10-05") ? "10月" : currentMonth;
+      const isCreated = fetchMock.mock.calls.some(([, options]) => options?.method === "POST");
+      const payload = url.includes("reference-values")
+        ? references
+        : url.includes("settings/storage/tree")
+          ? {
+              root: "C:\\MatLens照片",
+              target_month: requestedMonth,
+              month_exists: requestedMonth !== "10月" || isCreated,
+              months: requestedMonth === "10月" && !isCreated
+                ? storageTree.months
+                : [...storageTree.months, { name: "10月", subfolders: ["底座", "探頭", "模組"] }],
+            }
+          : url.endsWith("settings/storage/folders")
+            ? { root: "C:\\MatLens照片", month: { name: "10月", subfolders: ["底座", "探頭", "模組"] } }
+            : url.includes("settings/storage")
+              ? { path: "C:\\MatLens照片" }
+              : { items: [], total: 0 };
+      return { ok: true, json: async () => payload } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText("維修日期"), { target: { value: "2026-10-05" } });
+    expect(await screen.findByText(/找不到「10月」資料夾/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("自訂子目錄名稱"), { target: { value: "模組" } });
+    fireEvent.click(screen.getByRole("button", { name: "建立 10月與子目錄" }));
+
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "儲存子目錄" })).toHaveValue("模組"));
+    const createCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("settings/storage/folders"));
+    expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({
+      month: "10月",
+      subfolders: ["底座", "探頭", "模組"],
+    });
   });
 });

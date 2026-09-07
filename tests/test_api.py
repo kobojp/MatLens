@@ -26,7 +26,13 @@ def client(tmp_path: Path) -> TestClient:
     return TestClient(app)
 
 
-def create_case(client: TestClient, colors: list[tuple[int, int, int]]) -> object:
+def create_case(
+    client: TestClient,
+    colors: list[tuple[int, int, int]],
+    *,
+    storage_month: str = "8月",
+    storage_subfolder: str = "底座",
+) -> object:
     roles = ["前", "中", "完成"][: len(colors)]
     return client.post(
         "/api/cases",
@@ -40,6 +46,8 @@ def create_case(client: TestClient, colors: list[tuple[int, int, int]]) -> objec
             "location": "走廊東側",
             "notes": "測試案件",
             "photo_roles": str(roles).replace("'", '"'),
+            "storage_month": storage_month,
+            "storage_subfolder": storage_subfolder,
         },
         files=[
             ("photos", (f"photo-{index}.jpg", jpeg_bytes(color), "image/jpeg"))
@@ -56,6 +64,7 @@ def test_health_and_reference_values(client: TestClient) -> None:
 
 
 def test_create_list_and_read_case(client: TestClient, tmp_path: Path) -> None:
+    (tmp_path / "photos" / "8月" / "底座").mkdir(parents=True)
     response = create_case(client, [(180, 20, 20), (20, 180, 20), (20, 20, 180)])
     assert response.status_code == 201
     created = response.json()
@@ -68,6 +77,7 @@ def test_create_list_and_read_case(client: TestClient, tmp_path: Path) -> None:
     saved_folder = tmp_path / "photos" / created["folder_path"]
     assert saved_folder.is_dir()
     assert len(list(saved_folder.glob("*.jpg"))) == 3
+    assert Path(created["folder_path"]).parts[:2] == ("8月", "底座")
 
     listed = client.get("/api/cases", params={"q": "M3-07"}).json()
     assert listed["total"] == 1
@@ -77,6 +87,10 @@ def test_create_list_and_read_case(client: TestClient, tmp_path: Path) -> None:
 
 
 def test_duplicate_photo_is_rejected_without_new_case(client: TestClient) -> None:
+    assert client.post(
+        "/api/settings/storage/folders",
+        json={"month": "8月", "subfolders": ["底座"]},
+    ).status_code == 201
     colors = [(180, 20, 20), (20, 180, 20), (20, 20, 180)]
     first = create_case(client, colors)
     assert first.status_code == 201
@@ -88,6 +102,10 @@ def test_duplicate_photo_is_rejected_without_new_case(client: TestClient) -> Non
 
 
 def test_invalid_image_is_rejected(client: TestClient) -> None:
+    assert client.post(
+        "/api/settings/storage/folders",
+        json={"month": "8月", "subfolders": ["底座"]},
+    ).status_code == 201
     response = client.post(
         "/api/cases",
         data={
@@ -98,6 +116,8 @@ def test_invalid_image_is_rejected(client: TestClient) -> None:
             "material": "底座",
             "issues": '["錯誤設備"]',
             "photo_roles": '["前"]',
+            "storage_month": "8月",
+            "storage_subfolder": "底座",
         },
         files=[("photos", ("fake.jpg", b"not-an-image", "image/jpeg"))],
     )
@@ -106,6 +126,10 @@ def test_invalid_image_is_rejected(client: TestClient) -> None:
 
 
 def test_storage_directory_can_be_changed(client: TestClient, tmp_path: Path) -> None:
+    assert client.post(
+        "/api/settings/storage/folders",
+        json={"month": "8月", "subfolders": ["底座"]},
+    ).status_code == 201
     original = create_case(client, [(180, 20, 20), (20, 180, 20), (20, 20, 180)])
     assert original.status_code == 201
     original_photo_url = original.json()["photos"][0]["content_url"]
@@ -118,12 +142,84 @@ def test_storage_directory_can_be_changed(client: TestClient, tmp_path: Path) ->
     assert configured.status_code == 200
     assert Path(configured.json()["path"]) == custom_root.resolve()
 
+    assert client.post(
+        "/api/settings/storage/folders",
+        json={"month": "8月", "subfolders": ["底座"]},
+    ).status_code == 201
+
     response = create_case(client, [(181, 21, 21), (21, 181, 21), (21, 21, 181)])
     assert response.status_code == 201
     created = response.json()
     assert Path(created["storage_root"]) == custom_root.resolve()
     assert (custom_root / created["folder_path"]).is_dir()
     assert client.get(original_photo_url).status_code == 200
+
+
+def test_storage_tree_scans_months_and_subfolders(client: TestClient, tmp_path: Path) -> None:
+    photo_root = tmp_path / "photos"
+    for relative in ["8月/底座", "8月/模組", "9月/底座", "9月/探頭"]:
+        (photo_root / relative).mkdir(parents=True)
+    (photo_root / "9月" / "not-a-folder.txt").write_text("x", encoding="utf-8")
+    (photo_root / "2026" / "9月").mkdir(parents=True)
+
+    response = client.get("/api/settings/storage/tree", params={"work_date": "2026-09-05"})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "root": str(photo_root.resolve()),
+        "target_month": "9月",
+        "month_exists": True,
+        "months": [
+            {"name": "8月", "subfolders": ["底座", "模組"]},
+            {"name": "9月", "subfolders": ["底座", "探頭"]},
+        ],
+    }
+
+
+def test_missing_month_and_custom_subfolders_can_be_created(
+    client: TestClient, tmp_path: Path
+) -> None:
+    missing = client.get(
+        "/api/settings/storage/tree", params={"work_date": "2026-10-05"}
+    ).json()
+    assert missing["target_month"] == "10月"
+    assert missing["month_exists"] is False
+
+    created = client.post(
+        "/api/settings/storage/folders",
+        json={"month": "10月", "subfolders": ["底座", "自訂設備"]},
+    )
+
+    assert created.status_code == 201
+    assert (tmp_path / "photos" / "10月" / "底座").is_dir()
+    assert (tmp_path / "photos" / "10月" / "自訂設備").is_dir()
+    assert created.json()["month"]["subfolders"] == ["底座", "自訂設備"]
+
+
+def test_case_requires_existing_selected_destination(client: TestClient) -> None:
+    response = create_case(
+        client,
+        [(180, 20, 20)],
+        storage_month="9月",
+        storage_subfolder="探頭",
+    )
+    assert response.status_code == 400
+    assert "不存在" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("month", "subfolder"),
+    [("../9月", "底座"), ("9月", "../底座"), ("C:\\temp", "底座"), ("13月", "底座")],
+)
+def test_storage_folder_creation_rejects_unsafe_names(
+    client: TestClient, month: str, subfolder: str
+) -> None:
+    response = client.post(
+        "/api/settings/storage/folders",
+        json={"month": month, "subfolders": [subfolder]},
+    )
+    assert response.status_code == 400
+    assert "目錄名稱" in response.json()["detail"]
 
 
 def test_custom_material_and_issue_are_persisted(client: TestClient) -> None:

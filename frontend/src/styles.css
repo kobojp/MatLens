@@ -88,6 +88,21 @@ main { max-width: 1520px; margin: 0 auto; padding: 18px; }
 .path-preview code { overflow-wrap: anywhere; color: #344149; font-size: 11px; }
 .path-preview small { overflow-wrap: anywhere; color: #7a878e; font-size: 10px; }
 
+.storage-destination { margin: 0 0 14px; padding: 11px; border: 1px solid #d8e0e4; border-radius: 8px; background: #fff; }
+.storage-destination legend { padding: 0 5px; color: #4f5e66; font-weight: 700; }
+.destination-selects { display: grid; grid-template-columns: 1fr 1fr auto; align-items: end; gap: 7px; }
+.destination-selects label { display: grid; gap: 4px; color: #68767e; font-size: 11px; }
+.destination-selects select, .folder-custom-row input { min-width: 0; width: 100%; border: 1px solid #cbd5da; border-radius: 6px; padding: 8px 9px; color: #1e2a30; background: #fff; }
+.destination-selects button, .folder-custom-row button, .add-folder-button { border: 1px solid #ccd6db; border-radius: 6px; padding: 8px 9px; color: #8f3029; background: #fff; font-size: 11px; }
+.destination-selects button:disabled, .folder-custom-row button:disabled { cursor: wait; opacity: .6; }
+.folder-warning { margin-top: 9px; padding: 8px 9px; border-radius: 6px; color: #8b5a17; background: #fff8e8; font-size: 11px; }
+.folder-creator { display: grid; gap: 7px; margin-top: 9px; padding-top: 9px; border-top: 1px solid #e4e9eb; color: #68767e; font-size: 11px; }
+.folder-presets { display: flex; flex-wrap: wrap; gap: 6px 10px; }
+.folder-presets label { display: inline-flex; align-items: center; gap: 4px; color: #38464d; }
+.folder-custom-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; }
+.folder-custom-row button:first-of-type { color: #fff; background: #c6372c; border-color: #c6372c; }
+.add-folder-button { margin-top: 8px; border-style: dashed; }
+
 .field-grid { display: grid; grid-template-columns: 1fr 112px; gap: 10px; }
 .field-grid label, .notes-field { display: grid; gap: 5px; color: #5e6d75; font-size: 12px; }
 .field-grid .wide { grid-column: 1 / -1; }
@@ -181,6 +196,10 @@ legend { margin-bottom: 7px; color: #5e6d75; font-size: 12px; }
   .role-editor { grid-template-columns: 1fr 1fr; }
   .generated-name { grid-column: 1 / -1; }
   .field-grid { grid-template-columns: 1fr 100px; }
+  .destination-selects { grid-template-columns: 1fr 1fr; }
+  .destination-selects .scan-button { grid-column: 1 / -1; }
+  .folder-custom-row { grid-template-columns: 1fr auto; }
+  .folder-custom-row button:last-child { grid-column: 1 / -1; }
   .modal-backdrop { padding: 8px; }
 }
 .update-section { padding: 8px 28px; background: #f4f6f7; }
