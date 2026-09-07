@@ -8,6 +8,15 @@ MatLens 是供 Windows 10／11 使用的消防材料更換照片整理與案件�
 
 本檔案適用於整個 repository。
 
+## Repository 與發佈現況
+
+- 原始碼倉庫：公開 `https://github.com/kobojp/MatLens`。
+- Windows 安裝包與線上更新檔：同一倉庫的 GitHub Releases。
+- 目前正式版本：`v0.3.1`；版本唯一來源為 `desktop/version.py`。
+- `kobojp/MatLens-Releases` 僅保留 v0.3.0 的過渡更新入口，不再放置新版本安裝包。
+- 不得刪除或破壞舊倉庫的 `stable.json` 過渡入口，否則已安裝 v0.3.0 無法自動移轉。
+- 公開 repository 不代表可提交現場照片、案件資料、機器路徑、憑證或簽章私鑰。
+
 ## 技術棧
 
 - Backend：Python 3.12、FastAPI、SQLite、Pillow
@@ -28,6 +37,10 @@ MatLens/
 ├─ frontend/dist/     正式前端建置結果，由 FastAPI 提供
 ├─ tests/             後端 API 與儲存測試
 ├─ desktop/           桌面入口、單一實例、本機服務與資料接續
+│  ├─ update_core.py  更新資訊簽章、下載與 ZIP 安全驗證
+│  ├─ updates.py      更新狀態與背景下載
+│  ├─ updater.py      獨立更新器、備份、替換與失敗回復
+│  └─ version.py      正式版本唯一來源
 ├─ packaging/         EXE／ZIP 建置與捷徑安裝腳本
 ├─ docs/              桌面驗證與交付說明
 ├─ data/              執行時 SQLite 與預設照片目錄
@@ -72,6 +85,12 @@ MatLens/
 PowerShell -ExecutionPolicy Bypass -File .\run.ps1
 ```
 
+桌面版開發啟動：
+
+```powershell
+PowerShell -ExecutionPolicy Bypass -File .\run-desktop.ps1
+```
+
 後端開發：
 
 ```powershell
@@ -96,6 +115,12 @@ npm --prefix frontend test
 npm --prefix frontend run build
 ```
 
+建立 Windows 安裝包與更新包：
+
+```powershell
+PowerShell -ExecutionPolicy Bypass -File .\packaging\build.ps1
+```
+
 ## 開發流程
 
 1. 先理解需求與目前行為，檢查相關程式和既有資料結構。
@@ -105,6 +130,26 @@ npm --prefix frontend run build
 5. 修改後執行與風險相稱的測試；交付前執行完整驗證。
 6. 前端變更必須重新產生 `frontend/dist/`，因正式服務直接提供此目錄。
 7. 若服務原本正在執行，完成建置後重新啟動並確認 `http://127.0.0.1:8000/` 可用。
+
+## 版本與線上更新規則
+
+- 修改版本時，先改 `desktop/version.py`，並同步 `pyproject.toml`、`uv.lock` 與
+  `packaging/MatLens.iss`；檔名與 Release tag 必須一致。
+- 正式版使用 `x.y.z`；測試版可使用 `x.y.z-rc.n`，不得把測試版放進正式頻道。
+- `desktop/update-source.json` 的正式更新網址必須指向
+  `kobojp/MatLens/releases/latest/download/stable.json`。
+- 每個正式 Release 必須包含完整安裝 ZIP、更新專用 ZIP 與 `stable.json`。
+- 更新 manifest 必須使用既有 Ed25519 私鑰簽署；私鑰位於 repository 之外，
+  不得重新產生後直接取代內建公鑰，也不得加入 Git、Release 或紀錄輸出。
+- 發佈前先建立 draft Release，核對 tag、目標 commit、資產名稱、大小與 SHA-256，
+  完成打包 EXE 自測及隔離升級測試後才公開。
+- 發佈後必須從公開 `releases/latest` URL 實際下載 manifest 與更新包，驗證簽章、
+  SHA-256、版本與平台；不能只測試本機檔案。
+- 線上更新不得自動強制安裝。沒有網路、簽章錯誤或下載損壞時，原版本仍須可使用。
+- `DATA_COMPATIBILITY` 不可隨意變更；資料結構不相容時，必須先設計可驗證的遷移與復原。
+- Release ZIP、manifest、PyInstaller build 與自測報告保持在忽略的 `dist/`、`build/`，
+  不提交二進位產物到 Git。
+- 詳細發佈與復原流程以 `docs/online-updates.md` 為準。
 
 ## Backend 規則
 
@@ -143,4 +188,6 @@ npm --prefix frontend run build
 - 既有案件與照片仍可讀取。
 - Ruff、pytest、Vitest 與正式前端 build 通過。
 - Windows 啟動腳本仍可使用 `uv` 成功啟動服務。
+- 影響桌面版或更新器時，打包 EXE 自測與隔離更新／回復測試必須通過。
+- 發佈新版本時，原倉庫 Release 可公開下載，manifest 簽章與套件 SHA-256 驗證通過。
 - 回覆使用者時簡要說明完成內容、驗證結果及必要的操作方式。
