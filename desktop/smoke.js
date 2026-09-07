@@ -63,7 +63,14 @@
     document.querySelector('.row-actions button').click();
     await wait(() => document.querySelectorAll('.saved-photo-grid img').length === 3, 'case detail');
     await wait(() => [...document.querySelectorAll('.saved-photo-grid img')].every(img => img.naturalWidth === 800), 'saved photos');
-    return { ok: true, photos: 3, address: 'DESKTOP-QA', dirty: window.matlensDesktopState.dirty, portrait_fit: true, zoom_pan: true };
+    let update_panel = false;
+    if (window.pywebview?.api.update_status) {
+      await wait(() => document.querySelector('.update-section > button'), 'update panel');
+      document.querySelector('.update-section > button').click();
+      await wait(() => document.querySelector('select[aria-label="更新頻道"]'), 'update channel');
+      update_panel = document.querySelector('select[aria-label="更新頻道"]').value === 'stable';
+    }
+    return { ok: true, photos: 3, address: 'DESKTOP-QA', dirty: window.matlensDesktopState.dirty, portrait_fit: true, zoom_pan: true, update_panel };
   } catch (error) {
     return { ok: false, error: String(error), text: document.body.innerText };
   }

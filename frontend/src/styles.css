@@ -183,3 +183,8 @@ legend { margin-bottom: 7px; color: #5e6d75; font-size: 12px; }
   .field-grid { grid-template-columns: 1fr 100px; }
   .modal-backdrop { padding: 8px; }
 }
+.update-section { padding: 8px 28px; background: #f4f6f7; }
+.update-panel { background: white; border: 1px solid #cbd5df; border-radius: 10px; padding: 20px; max-width: 760px; }
+.update-panel button, .update-panel select { margin: 6px; padding: 8px 14px; }
+.update-notes { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.update-panel progress { width: 100%; }

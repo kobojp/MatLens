@@ -1,7 +1,7 @@
 [Setup]
 AppId={{BD95155E-A346-444B-927A-567D0E96AA69}
 AppName=MatLens
-AppVersion=0.2.0
+AppVersion=0.3.1
 DefaultDirName={localappdata}\Programs\MatLens
 DefaultGroupName=MatLens
 PrivilegesRequired=lowest
@@ -9,7 +9,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 OutputDir=..\dist\installer
-OutputBaseFilename=MatLens-Setup-0.2.0-x64
+OutputBaseFilename=MatLens-Setup-0.3.1-x64
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

@@ -1,10 +1,11 @@
 [project]
 name = "matlens"
-version = "0.1.0"
+version = "0.3.1"
 description = "消防材料更換照片整理與案件管理系統"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "cryptography>=50.0.1",
     "fastapi",
     "pillow",
     "python-multipart",

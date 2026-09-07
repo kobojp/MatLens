@@ -87,3 +87,33 @@ Get-Content $report
 - [pywebview API](https://pywebview.flowrl.com/api/)：原生對話框、視窗事件與 JavaScript 回報。
 - [pywebview 使用指南](https://pywebview.flowrl.com/guide/usage.html)。
 - [Microsoft WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)：Runtime 下載。
+
+## 線上更新驗證（2026-09-07，0.3.0）
+
+- Ruff 通過；pytest 54 項、Vitest 12 項通過；正式前端 build 通過。
+- 新增簽章／雜湊／版本頻道／不相容資料版本／ZIP 路徑及連結／下載大小限制測試。
+- 驗證離線與損壞下載可重試、未儲存／正在儲存阻止更新、安裝失敗解除 UI 鎖定。
+- 原始碼與打包 EXE 的真實 WebView2 匯入、完整預覽、縮放平移、儲存回看通過。
+- 隔離 LOCALAPPDATA 中執行獨立 PyInstaller 更新器：驗證已簽章更新包、SQLite backup、
+  新版預先自測、程式目錄替換與新版啟動健康檢查成功；既有材料選項及照片內容不變。
+- 上述更新演練的舊程式為測試標記，僅舊更新器版本模擬為 0.2.0；使用真實 0.3.0 EXE。
+  不是宣稱原來沒有更新功能的 0.2.0 能自行更新。首次升級仍須手動執行安裝腳本。
+- 替換／啟動失敗回復使用真實檔案系統回歸測試；沒有在正式使用者目錄注入故障。
+- 更新 ZIP 314 個項目，包含主程式及更新器，未發現照片資料目錄、DB、私鑰、測試更新器。
+- 報告在忽略的 `build/update-source-self-test.json`、`build/update-worker-self-test.json`、
+  `build/update-frozen-worker-self-test.json`；測試資料在具 `matlens-update-qa-` 前綴的 TEMP。
+- Windows 11 已實測；Windows 10、斷電過程、各家防毒鎖檔情境仍待實機驗證。
+- EXE 尚無 Authenticode 簽章；更新包另外有 Ed25519 驗證，兩者不可混為一談。
+- 公開發佈後以真正的 UpdateService 取得 `releases/latest/download/stable.json`，
+  確認目前版本 0.3.0，再實際下載 43,725,673 bytes 的更新包；簽章及 SHA-256 驗證通過。
+  可用 `uv run --locked python -m tests.check_update_release` 重跑。
+- 原始碼自測關閉時偶有 pywebview 的已處置 WebView2 回呼警告；報告與 exit code 皆成功，
+  未影響照片持久化。這項關閉時序的第三方回呼警告仍需後續追蹤。
+
+## 原倉庫公開與更新來源遷移（0.3.1）
+
+- 公開前掃描完整 Git 歷史與目前內容，未發現常見 Token、私鑰、照片、資料庫或 `.env`。
+- 0.3.1 內建更新網址改為 `kobojp/MatLens`，舊下載倉庫只保留 v0.3.0 過渡 manifest。
+- 遷移演練使用測試專用的凍結 0.3.0 更新器與真實 0.3.1 EXE，全程在隔離 LOCALAPPDATA。
+- 0.3.1 原始碼與打包 EXE 的真實 WebView2 自測通過；隔離升級確認 SQLite、照片、
+  備份及舊程式均保留，新版啟動版本為 0.3.1。

@@ -21,3 +21,5 @@ data/
 *.spec
 build/
 dist/
+*.key
+*.pem

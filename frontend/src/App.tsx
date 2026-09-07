@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PhotoPreview from "./PhotoPreview";
+import UpdatePanel from "./UpdatePanel";
 
 type ReferenceValues = {
   buildings: string[];
@@ -117,6 +118,7 @@ export default function App() {
   const [caseMaterial, setCaseMaterial] = useState("");
   const [selectedCase, setSelectedCase] = useState<CaseRecord | null>(null);
   const [saving, setSaving] = useState(false);
+  const [updateInstalling, setUpdateInstalling] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
@@ -221,6 +223,7 @@ export default function App() {
   }, []);
 
   function addFiles(fileList: FileList | File[]) {
+    if (updateInstalling) return;
     setError("");
     const accepted = Array.from(fileList).filter((file) =>
       ["image/jpeg", "image/png", "image/webp"].includes(file.type),
@@ -289,6 +292,7 @@ export default function App() {
 
   async function saveCase(event: React.FormEvent) {
     event.preventDefault();
+    if (updateInstalling) return;
     setError("");
     setNotice("");
     if (!photos.length || !floor.trim() || !addressCode.trim()) {
@@ -444,7 +448,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <header className="topbar">
+      <header className="topbar" inert={updateInstalling}>
         <div className="brand-block">
           <div className="brand-mark">ML</div>
           <div>
@@ -463,7 +467,9 @@ export default function App() {
         </div>
       </header>
 
-      <div className="storage-bar">
+      <UpdatePanel onInstalling={setUpdateInstalling} />
+
+      <div className="storage-bar" inert={updateInstalling}>
         <span>照片儲存目錄</span>
         <code title={storageRoot}>{storageRoot || "讀取中…"}</code>
         <button type="button" onClick={chooseStorageRoot} disabled={choosingStorage}>
@@ -478,7 +484,7 @@ export default function App() {
         </div>
       )}
 
-      <main>
+      <main inert={updateInstalling}>
         <form id="case-form" className="workspace" onSubmit={saveCase}>
           <section
             className={`photo-rail ${dragging ? "dragging" : ""}`}

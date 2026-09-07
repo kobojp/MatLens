@@ -23,7 +23,7 @@
 
 ### 桌面版（Windows 10／11 x64）
 
-解壓縮 `MatLens-0.2.0-win-x64.zip` 後：
+解壓縮 `MatLens-0.3.1-win-x64.zip` 後：
 
 - 直接雙擊 `MatLens/MatLens.exe` 啟動免安裝版，必須保留整個資料夾。
 - 或雙擊 `Install-MatLens.cmd` 安裝至使用者程式目錄並建立桌面／開始選單捷徑。
@@ -55,6 +55,14 @@ PowerShell -ExecutionPolicy Bypass -File .\packaging\build.ps1
 `packaging/MatLens.iss` 另提供 Inno Setup 6 安裝設定，已安裝編譯器後可加 `-Installer`。
 目前交付物是免安裝 ZIP 與捷徑安裝腳本；Inno Setup 安裝包尚未驗證。
 測試範圍與限制請見 [桌面驗證紀錄](docs/desktop-validation.md)。
+
+### 線上更新（0.3.0 起）
+
+從 [MatLens Releases](https://github.com/kobojp/MatLens/releases) 取得完整安裝 ZIP，
+執行 `Install-MatLens.cmd` 一次後，往後可使用「關於與更新」。原始碼與下載都在同一個公開倉庫。
+啟動時只檢查正式版，不自動下載或強制安裝；下載驗證完成後，先儲存案件，再選擇安裝重啟。
+開發版／可攜版只能檢查更新。沒有網路仍可整理及儲存案件。
+更新採簽章驗證、SQLite 備份與保留前一版程式，詳見 [更新維護與復原](docs/online-updates.md)。
 
 ### 原有網頁版
 

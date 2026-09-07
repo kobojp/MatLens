@@ -19,6 +19,32 @@ class DraftState:
                 self._saving = bool(saving)
 
 
+class DesktopBridge(DraftState):
+    def __init__(self, updates, close_window):
+        super().__init__()
+        self._updates = updates
+        self._close_window = close_window
+
+    def update_status(self):
+        return self._updates.status()
+
+    def check_update(self, channel="stable"):
+        return self._updates.check(channel)
+
+    def download_update(self):
+        return self._updates.fetch_package()
+
+    def install_update(self, dirty: bool, saving: bool):
+        with self._lock:
+            if dirty or saving or self._dirty or self._saving:
+                return {"error": "請先儲存或清除目前案件，再安裝更新。"}
+            result = self._updates.launch_installer()
+        if result.get("ok"):
+            # Let the bridge response reach React before closing the WebView.
+            threading.Timer(0.5, self._close_window).start()
+        return result
+
+
 def confirm_close(state: DraftState, confirm: Callable[[str, str], bool]) -> bool:
     # WinForms closing runs on the UI thread. Never evaluate JavaScript here:
     # WebView2 needs that same thread to complete its async result -> deadlock.

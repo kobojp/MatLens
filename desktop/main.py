@@ -13,10 +13,12 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from backend.app.main import create_app
-from desktop.bridge import DraftState, confirm_close
+from desktop.bridge import DesktopBridge, confirm_close
 from desktop.data import migrate_legacy, resource_root, user_data_dir
 from desktop.instance import SingleInstance
 from desktop.server import running_server
+from desktop.updates import UpdateService
+from desktop.version import VERSION
 
 
 def main() -> int:
@@ -24,12 +26,23 @@ def main() -> int:
     parser.add_argument("--import-from", type=Path, help="首次啟動時匯入舊版 matlens.db")
     parser.add_argument("--self-test", action="store_true", help="在獨立暫存目錄驗證桌面流程")
     parser.add_argument("--report", type=Path, help="--self-test 的 JSON 驗證報告路徑")
+    parser.add_argument("--startup-report", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if os.name != "nt":
         raise RuntimeError("桌面版目前支援 Windows 10／11。")
     data_dir = (Path(tempfile.mkdtemp(prefix="matlens-self-test-"))
                 if args.self_test else user_data_dir())
     data_dir.mkdir(parents=True, exist_ok=True)
+    if args.startup_report:
+        if (args.startup_report.resolve().parent.parent != (data_dir / "updates").resolve()
+                or args.startup_report.name != "startup.json"):
+            raise RuntimeError("啟動驗證路徑不正確。")
+    elif not args.self_test and (data_dir / "updates" / "install.lock").exists():
+        ctypes.windll.user32.MessageBoxW(
+            None, "更新正在進行，請稍候再開啟。若曾中斷更新，請查看 updates 的復原紀錄。",
+            "MatLens 正在更新", 0x40,
+        )
+        return 1
     log_path = data_dir / "logs" / "desktop.log"
     log_path.parent.mkdir(exist_ok=True)
     logging.basicConfig(
@@ -69,16 +82,20 @@ def main() -> int:
         app = create_app(database_path=database, photo_root=data_dir / "photos",
                          frontend_dist=frontend, folder_picker=pick_folder)
         with running_server(app) as url:
-            draft = DraftState()
+            updates = UpdateService(data_dir, enabled=not args.self_test)
+            draft = DesktopBridge(updates, lambda: window.destroy())
             window = webview.create_window(
                 "MatLens — 消防材料更換照片管理", url, width=1440, height=950,
                 min_size=(1000, 700), background_color="#f4f6f7",
                 js_api=draft,
-                hidden=args.self_test,
+                hidden=bool(args.self_test or args.startup_report),
             )
             stop = threading.Event()
 
             def may_close() -> bool:
+                if updates.status()["phase"] == "installing":
+                    with draft._lock:
+                        return not (draft._dirty or draft._saving)
                 return confirm_close(draft, window.create_confirmation_dialog)
 
             def listen_activation():
@@ -100,7 +117,27 @@ def main() -> int:
                         gui="edgechromium", private_mode=True,
                     )
                 else:
-                    webview.start(gui="edgechromium", private_mode=True)
+                    def report_startup():
+                        if not args.startup_report:
+                            return
+                        import time
+
+                        if not window.events.loaded.wait(30):
+                            return
+                        for _ in range(50):
+                            if window.evaluate_js(
+                                "document.querySelector('h1')?.textContent === 'MatLens'"
+                            ):
+                                staged = args.startup_report.with_suffix(".tmp")
+                                staged.write_text(json.dumps({"ok": True, "version": VERSION,
+                                                              "pid": os.getpid()}),
+                                                  encoding="utf-8")
+                                staged.replace(args.startup_report)
+                                window.show()
+                                return
+                            time.sleep(0.2)
+
+                    webview.start(report_startup, gui="edgechromium", private_mode=True)
             finally:
                 stop.set()
                 watcher.join(timeout=2)
@@ -113,6 +150,7 @@ def main() -> int:
                 result["persisted_cases"] = db.execute("SELECT COUNT(*) FROM cases").fetchone()[0]
                 result["persisted_photos"] = db.execute("SELECT COUNT(*) FROM photos").fetchone()[0]
             result["data_dir"] = str(data_dir)
+            result["version"] = VERSION
             result["ok"] = bool(result.get("ok") and result["persisted_cases"] == 1
                                 and result["persisted_photos"] == 3)
             report = args.report or data_dir / "report.json"
