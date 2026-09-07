@@ -25,7 +25,7 @@ from desktop.updates import UpdateService
 
 def signed_manifest(**overrides):
     private = Ed25519PrivateKey.generate()
-    value = {"version": "0.4.0", "channel": "stable", "platform": "win-x64",
+    value = {"version": "0.4.1", "channel": "stable", "platform": "win-x64",
              "data_compatibility": 1, "size": 3, "sha256": hashlib.sha256(b"abc").hexdigest(),
              "url": "https://example.com/package.zip", "notes": "更新說明", **overrides}
     payload = json.dumps(value).encode()

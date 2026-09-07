@@ -25,7 +25,7 @@
 
 ### 桌面版（Windows 10／11 x64）
 
-解壓縮 `MatLens-0.3.1-win-x64.zip` 後：
+解壓縮 `MatLens-0.4.0-win-x64.zip` 後：
 
 - 直接雙擊 `MatLens/MatLens.exe` 啟動免安裝版，必須保留整個資料夾。
 - 或雙擊 `Install-MatLens.cmd` 安裝至使用者程式目錄並建立桌面／開始選單捷徑。

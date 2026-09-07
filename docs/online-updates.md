@@ -22,7 +22,7 @@
    URL、SHA-256、大小、平台、資料相容版本及更新說明。
 
 版本來源是 `desktop/version.py`，也須同步 pyproject.toml／uv.lock 與 Inno Setup 版本。
-正式版本格式例如 `0.3.1`；測試版本可用 `0.4.0-rc.1`。
+正式版本格式例如 `0.4.0`；測試版本可用 `0.5.0-rc.1`。
 正式頻道拒絕 rc 版本。測試頻道網址為固定 `preview` release 的 `preview.json`，
 尚未發佈該資產時顯示可重試的更新錯誤，不影響正式版。
 
@@ -34,9 +34,9 @@
 PowerShell -ExecutionPolicy Bypass -File .\packaging\build.ps1
 uv run --locked python -m desktop.release `
   --key "$env:LOCALAPPDATA\MatLens-Signing\release.key" `
-  --package .\dist\MatLens-0.3.1-update-win-x64.zip `
-  --url "https://github.com/kobojp/MatLens/releases/download/v0.3.1/MatLens-0.3.1-update-win-x64.zip" `
-  --notes .\docs\release-v0.3.1.md `
+  --package .\dist\MatLens-0.4.0-update-win-x64.zip `
+  --url "https://github.com/kobojp/MatLens/releases/download/v0.4.0/MatLens-0.4.0-update-win-x64.zip" `
+  --notes .\docs\release-v0.4.0.md `
   --output .\dist\stable.json
 ```
 
