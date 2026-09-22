@@ -282,3 +282,62 @@ def test_custom_option_can_be_deleted_but_default_cannot(client: TestClient) -> 
         json={"value": "底座"},
     )
     assert protected_default.status_code == 404
+
+
+# ── 自由路徑掃描功能 ──────────────────────────────────────────
+
+def test_storage_scan_returns_subfolders(client: TestClient, tmp_path: Path) -> None:
+    scan_root = tmp_path / "scanned"
+    scan_root.mkdir()
+    (scan_root / "二門診 5F M3-214 無回應").mkdir()
+    (scan_root / "三門診 3F D2-001 錯誤設備").mkdir()
+
+    response = client.get("/api/settings/storage/scan", params={"path": str(scan_root)})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["root"] == str(scan_root.resolve())
+    assert "二門診 5F M3-214 無回應" in data["subfolders"]
+    assert "三門診 3F D2-001 錯誤設備" in data["subfolders"]
+
+
+def test_storage_scan_nonexistent_path(client: TestClient, tmp_path: Path) -> None:
+    response = client.get(
+        "/api/settings/storage/scan",
+        params={"path": str(tmp_path / "does-not-exist")},
+    )
+    assert response.status_code == 400
+    assert "不存在" in response.json()["detail"]
+
+
+def test_create_case_free_mode(client: TestClient, tmp_path: Path) -> None:
+    free_root = tmp_path / "自由路徑測試"
+    subfolder = "二門診 5F M3-214 無回應"
+    (free_root / subfolder).mkdir(parents=True)
+
+    response = client.post(
+        "/api/cases",
+        data={
+            "work_date": "2026-09-21",
+            "building": "二門診",
+            "floor": "5F",
+            "address_code": "M3-214",
+            "material": "探頭",
+            "issues": '["無回應"]',
+            "location": "",
+            "notes": "",
+            "photo_roles": '["前", "中", "完成"]',
+            "storage_month": "",
+            "storage_subfolder": subfolder,
+            "free_scan_root": str(free_root),
+        },
+        files=[
+            ("photos", (f"photo-{i}.jpg", jpeg_bytes(color), "image/jpeg"))
+            for i, color in enumerate([(200, 10, 10), (10, 200, 10), (10, 10, 200)], start=1)
+        ],
+    )
+    assert response.status_code == 201
+    created = response.json()
+    assert created["is_complete"] is True
+    saved_folder = (free_root / subfolder / Path(created["folder_path"]).name)
+    assert saved_folder.is_dir()
+    assert len(list(saved_folder.glob("*.jpg"))) == 3

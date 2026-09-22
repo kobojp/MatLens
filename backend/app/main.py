@@ -39,6 +39,8 @@ from .storage import (
     create_storage_folders,
     get_case,
     list_cases,
+    resolve_free_destination,
+    scan_directory_subfolders,
     scan_storage_tree,
 )
 
@@ -157,6 +159,16 @@ def create_app(
     def update_storage_settings(settings: StorageSettingsUpdate) -> dict[str, str]:
         return {"path": str(configure_storage_root(settings.path))}
 
+    @app.get("/api/settings/free-scan-path")
+    def get_free_scan_path() -> dict[str, str]:
+        return {"path": get_setting(app.state.database_path, "free_scan_path", "")}
+
+    @app.post("/api/settings/free-scan-path")
+    def save_free_scan_path(settings: StorageSettingsUpdate) -> dict[str, str]:
+        path = settings.path.strip()
+        set_setting(app.state.database_path, "free_scan_path", path)
+        return {"path": path}
+
     @app.get("/api/settings/storage/tree")
     def storage_tree(work_date: str = Query(...)) -> dict[str, object]:
         try:
@@ -168,6 +180,17 @@ def create_app(
         except StorageError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
 
+    @app.get("/api/settings/storage/scan")
+    def storage_scan(path: str = Query(..., max_length=1000)) -> dict[str, object]:
+        """掃描任意路徑的第一層子目錄（自由路徑模式）。"""
+        target = Path(path.strip()).expanduser()
+        if not target.is_absolute():
+            raise HTTPException(status_code=422, detail="掃描路徑必須使用完整絕對路徑")
+        try:
+            return scan_directory_subfolders(target)
+        except StorageError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
     @app.post("/api/settings/storage/folders", status_code=201)
     def add_storage_folders(settings: StorageFoldersCreate) -> dict[str, object]:
         try:
@@ -176,6 +199,7 @@ def create_app(
             )
         except StorageError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
+
 
     @app.post("/api/settings/storage/pick-folder")
     def pick_storage_folder() -> dict[str, object]:
@@ -255,8 +279,10 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         location: str = Form(default=""),
         notes: str = Form(default=""),
         photo_roles: str = Form(...),
-        storage_month: str = Form(...),
+        storage_month: str = Form(default=""),
         storage_subfolder: str = Form(...),
+        free_scan_root: str = Form(default=""),
+        free_with_date: str = Form(default="true"),
         photos: list[UploadFile] = File(...),
     ) -> dict[str, object]:
         try:
@@ -277,15 +303,33 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         except (json.JSONDecodeError, ValueError, ValidationError) as error:
             raise HTTPException(status_code=422, detail="案件欄位格式不正確") from error
 
+        # 決定儲存根目錄與目的地
+        use_free_mode = bool(free_scan_root.strip())
+        # include_date：月份模式永遠帶日期；自由路徑模式依前端勾選決定
+        include_date = True if not use_free_mode else (free_with_date.strip().lower() != "false")
+        try:
+            if use_free_mode:
+                free_root = Path(free_scan_root.strip()).expanduser()
+                if not free_root.is_absolute():
+                    raise HTTPException(status_code=422, detail="自由路徑必須使用完整絕對路徑")
+                effective_root = free_root.resolve()
+                resolve_free_destination(effective_root, storage_subfolder)  # 驗證子目錄存在
+            else:
+                effective_root = active_storage_root()
+        except StorageError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
         try:
             return await create_case(
                 database_path=app.state.database_path,
-                photo_root=active_storage_root(),
+                photo_root=effective_root,
                 case=case,
                 uploads=photos,
                 roles=[str(role) for role in parsed_roles],
-                storage_month=storage_month,
+                storage_month=storage_month if not use_free_mode else "",
                 storage_subfolder=storage_subfolder,
+                free_mode=use_free_mode,
+                include_date=include_date,
             )
         except DuplicatePhotoError as error:
             raise HTTPException(
@@ -294,6 +338,8 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
             ) from error
         except StorageError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
+
+
 
     @app.get("/api/photos/{photo_id}/content")
     def photo_content(photo_id: str) -> FileResponse:

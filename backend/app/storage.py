@@ -153,22 +153,46 @@ def resolve_storage_destination(photo_root: Path, month: str, subfolder: str) ->
     return destination
 
 
+def scan_directory_subfolders(scan_path: Path) -> dict[str, object]:
+    """掃描指定路徑的第一層可見子目錄，不需月份結構。"""
+    target = scan_path.resolve()
+    if not target.is_dir():
+        raise StorageError("指定路徑不存在或不是資料夾")
+    subfolders = [folder.name for folder in _visible_directories(target)]
+    return {
+        "root": str(target),
+        "subfolders": subfolders,
+    }
+
+
+def resolve_free_destination(scan_root: Path, subfolder: str) -> Path:
+    """驗證並回傳自由路徑模式下的目的地資料夾。"""
+    root = scan_root.resolve()
+    if not root.is_dir():
+        raise StorageError("掃描根目錄不存在")
+    destination = _direct_child(root, subfolder)
+    if not destination.is_dir():
+        raise StorageError("選擇的子目錄不存在，請重新掃描")
+    return destination
+
+
 def completeness(roles: list[str]) -> dict[str, object]:
     required = ["前", "中", "完成"]
     missing = [role for role in required if role not in roles]
     return {"is_complete": not missing, "missing_roles": missing}
 
 
-def _case_folder_name(case: CaseCreate) -> str:
+def _case_folder_name(case: CaseCreate, *, include_date: bool = True) -> str:
     issue_text = "-".join(case.issues)
     parts = [
-        case.work_date.isoformat(),
         sanitize_component(case.building),
         sanitize_component(case.floor),
         sanitize_component(case.address_code),
         sanitize_component(issue_text),
     ]
-    return "_".join(parts)
+    if include_date:
+        parts = [case.work_date.isoformat()] + parts
+    return " ".join(parts)
 
 
 def _available_case_path(
@@ -176,8 +200,10 @@ def _available_case_path(
     destination: Path,
     case: CaseCreate,
     database_path: Path,
+    *,
+    include_date: bool = True,
 ) -> Path:
-    name = _case_folder_name(case)
+    name = _case_folder_name(case, include_date=include_date)
     candidate = destination / name
     suffix = 2
     with connect(database_path) as connection:
@@ -242,6 +268,8 @@ async def create_case(
     roles: list[str],
     storage_month: str,
     storage_subfolder: str,
+    free_mode: bool = False,
+    include_date: bool = True,
 ) -> dict[str, object]:
     if not uploads:
         raise StorageError("至少需要一張照片")
@@ -254,9 +282,12 @@ async def create_case(
         raise StorageError(f"未知照片分類：{', '.join(unknown_roles)}")
 
     photo_root.mkdir(parents=True, exist_ok=True)
-    destination = resolve_storage_destination(
-        photo_root, storage_month, storage_subfolder
-    )
+    if free_mode:
+        destination = resolve_free_destination(photo_root, storage_subfolder)
+    else:
+        destination = resolve_storage_destination(
+            photo_root, storage_month, storage_subfolder
+        )
     staging_root = photo_root / ".staging"
     staging_root.mkdir(exist_ok=True)
     staging_dir = staging_root / str(uuid.uuid4())
@@ -320,7 +351,9 @@ async def create_case(
             temporary_path.rename(staging_dir / stored_name)
             item["stored_name"] = stored_name
 
-        final_dir = _available_case_path(photo_root, destination, case, database_path)
+        final_dir = _available_case_path(
+            photo_root, destination, case, database_path, include_date=include_date
+        )
         final_dir.parent.mkdir(parents=True, exist_ok=True)
         os.replace(staging_dir, final_dir)
 

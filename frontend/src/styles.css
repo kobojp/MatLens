@@ -207,3 +207,29 @@ legend { margin-bottom: 7px; color: #5e6d75; font-size: 12px; }
 .update-panel button, .update-panel select { margin: 6px; padding: 8px 14px; }
 .update-notes { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .update-panel progress { width: 100%; }
+
+/* storage mode tabs */
+.storage-mode-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+.mode-tab { padding: 6px 14px; border: 1px solid #ccd6db; border-radius: 6px 6px 6px 6px; background: #f5f8fa; color: #56666d; font-size: 13px; }
+.mode-tab.active { background: #c6372c; color: #fff; border-color: #c6372c; }
+.mode-tab:not(.active):hover { background: #edf1f3; }
+
+/* free path mode */
+.free-path-panel { display: grid; gap: 10px; }
+.free-path-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; align-items: center; }
+.free-path-input { width: 100%; padding: 7px 9px; border: 1px solid #c4cdd3; border-radius: 6px; background: #fff; }
+.free-path-input:disabled { background: #f3f6f7; color: #8a9299; }
+.free-path-row button { padding: 7px 11px; border: 1px solid #c4cdd3; border-radius: 6px; background: #fff; color: #2d3e46; white-space: nowrap; }
+.free-path-row .scan-button { background: #8f3029; color: #fff; border-color: #8f3029; }
+.free-path-row button:disabled { opacity: .6; cursor: wait; }
+
+.free-subfolder-list { display: grid; gap: 4px; max-height: 220px; overflow-y: auto; border: 1px solid #d6dee2; border-radius: 7px; padding: 6px; background: #fff; }
+.free-subfolder-item { display: flex; align-items: center; gap: 8px; padding: 6px 9px; border-radius: 5px; cursor: pointer; font-size: 13px; color: #27343b; border: 1px solid transparent; }
+.free-subfolder-item:hover { background: #f3f6f7; }
+.free-subfolder-item.active { background: #fff0ef; border-color: #e8b5b2; color: #8f2920; font-weight: 600; }
+.free-subfolder-item input[type="radio"] { accent-color: #c6372c; width: 15px; height: 15px; flex-shrink: 0; }
+
+.free-date-toggle { display: flex; align-items: center; gap: 7px; font-size: 13px; color: #3e4f57; cursor: pointer; }
+.free-date-toggle input[type="checkbox"] { accent-color: #c6372c; width: 15px; height: 15px; }
+.free-subfolder-preview { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: #f0f8f2; border: 1px solid #c2e0cc; border-radius: 6px; font-size: 12px; color: #2d5237; }
+.free-subfolder-preview code { font-size: 12px; }

@@ -55,6 +55,13 @@ type StorageTree = {
   months: StorageMonth[];
 };
 
+type FreeScanResult = {
+  root: string;
+  subfolders: string[];
+};
+
+type StorageMode = "month" | "free";
+
 type CustomOptionKind = "material" | "issue";
 
 const FALLBACK_REFERENCES: ReferenceValues = {
@@ -144,6 +151,12 @@ export default function App() {
   const [showFolderCreator, setShowFolderCreator] = useState(false);
   const [folderPresets, setFolderPresets] = useState<string[]>(["底座", "探頭"]);
   const [customFolderName, setCustomFolderName] = useState("");
+  const [storageMode, setStorageMode] = useState<StorageMode>("month");
+  const [freeScanPath, setFreeScanPath] = useState("");
+  const [freeScanResult, setFreeScanResult] = useState<FreeScanResult | null>(null);
+  const [freeSelectedSubfolder, setFreeSelectedSubfolder] = useState("");
+  const [freeLoadingFolders, setFreeLoadingFolders] = useState(false);
+  const [freeWithDate, setFreeWithDate] = useState(true);
   const [customOptionKind, setCustomOptionKind] = useState<CustomOptionKind | null>(null);
   const [customOptionValue, setCustomOptionValue] = useState("");
   const [savingCustomOption, setSavingCustomOption] = useState(false);
@@ -187,9 +200,20 @@ export default function App() {
 
   const folderPreview = useMemo(() => {
     const issueText = issues.map(safeName).join("-");
-    const folder = [workDate, building, floor, addressCode, issueText].map(safeName).join("_");
-    return `${selectedMonth || "請選月份"}\\${selectedSubfolder || "請選子目錄"}\\${folder}`;
-  }, [workDate, building, floor, addressCode, issues, selectedMonth, selectedSubfolder]);
+    if (storageMode === "free") {
+      const subfolder = freeSelectedSubfolder || "請選子目錄";
+      // 日期受 freeWithDate 控制，放在案件資料夾名稱中
+      const caseParts = freeWithDate
+        ? [workDate, building, floor, addressCode, issueText]
+        : [building, floor, addressCode, issueText];
+      const caseFolder = caseParts.map(safeName).join(" ");
+      return `${subfolder}\\${caseFolder}`;
+    }
+    // 月份模式：日期永遠在案件資料夾名稱，空白分隔
+    const caseFolder = [workDate, building, floor, addressCode, issueText].map(safeName).join(" ");
+    return `${selectedMonth || "請選月份"}\\${selectedSubfolder || "請選子目錄"}\\${caseFolder}`;
+  }, [workDate, building, floor, addressCode, issues, selectedMonth, selectedSubfolder, storageMode, freeSelectedSubfolder, freeWithDate]);
+
 
   const selectedMonthEntry = storageTree?.months.find((item) => item.name === selectedMonth);
 
@@ -259,6 +283,10 @@ export default function App() {
     fetch("/api/settings/storage")
       .then((response) => (response.ok ? response.json() : Promise.reject()))
       .then((payload: { path: string }) => setStorageRoot(payload.path))
+      .catch(() => undefined);
+    fetch("/api/settings/free-scan-path")
+      .then((response) => (response.ok ? response.json() : Promise.reject()))
+      .then((payload: { path: string }) => { if (payload.path) setFreeScanPath(payload.path); })
       .catch(() => undefined);
   }, []);
 
@@ -356,9 +384,16 @@ export default function App() {
       setError("請加入照片，並填寫樓層與定址碼。");
       return;
     }
-    if (!selectedMonthEntry || !selectedSubfolder) {
-      setError("請先選擇已存在的月份資料夾與子目錄。");
-      return;
+    if (storageMode === "month") {
+      if (!selectedMonthEntry || !selectedSubfolder) {
+        setError("請先選擇已存在的月份資料夾與子目錄。");
+        return;
+      }
+    } else {
+      if (!freeScanResult || !freeSelectedSubfolder) {
+        setError("請先掃描目錄並選擇子目錄。");
+        return;
+      }
     }
     setSaving(true);
     const form = new FormData();
@@ -371,8 +406,18 @@ export default function App() {
     form.set("location", location);
     form.set("notes", notes);
     form.set("photo_roles", JSON.stringify(photos.map((photo) => photo.role)));
-    form.set("storage_month", selectedMonth);
-    form.set("storage_subfolder", selectedSubfolder);
+    if (storageMode === "month") {
+      form.set("storage_month", selectedMonth);
+      form.set("storage_subfolder", selectedSubfolder);
+      form.set("free_scan_root", "");
+      form.set("free_with_date", "true");
+    } else {
+      // 自由路徑模式：子目錄原名不動，日期前綴由後端加到案件資料夾名稱
+      form.set("storage_month", "");
+      form.set("storage_subfolder", freeSelectedSubfolder);
+      form.set("free_scan_root", freeScanResult!.root);
+      form.set("free_with_date", freeWithDate ? "true" : "false");
+    }
     photos.forEach((photo) => form.append("photos", photo.file, photo.file.name));
     try {
       const response = await fetch("/api/cases", { method: "POST", body: form });
@@ -387,6 +432,7 @@ export default function App() {
       setSaving(false);
     }
   }
+
 
   async function viewCase(id: string) {
     setError("");
@@ -427,6 +473,54 @@ export default function App() {
     );
     setShowFolderCreator(!month || !month.subfolders.length);
   }
+
+  async function scanFreeDirectory(path: string) {
+    const trimmed = path.trim();
+    if (!trimmed) { setError("請輸入或選擇要掃描的路徑。"); return; }
+    setError("");
+    setFreeLoadingFolders(true);
+    setFreeScanResult(null);
+    setFreeSelectedSubfolder("");
+    try {
+      const response = await fetch(`/api/settings/storage/scan?path=${encodeURIComponent(trimmed)}`);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(errorText(payload));
+      const result = payload as FreeScanResult;
+      setFreeScanResult(result);
+      setFreeSelectedSubfolder(result.subfolders[0] ?? "");
+      // 掃描成功後靜默儲存路徑
+      fetch("/api/settings/free-scan-path", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: trimmed }),
+      }).catch(() => undefined);
+    } catch (scanError) {
+      setError(scanError instanceof Error ? scanError.message : "無法掃描目錄。");
+    } finally {
+      setFreeLoadingFolders(false);
+    }
+  }
+
+
+  async function chooseFreeFolder() {
+    setError("");
+    setFreeLoadingFolders(true);
+    try {
+      const response = await fetch("/api/settings/storage/pick-folder", { method: "POST" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(errorText(payload));
+      if (!payload.cancelled) {
+        const selectedPath = String(payload.path);
+        setFreeScanPath(selectedPath);
+        await scanFreeDirectory(selectedPath);
+      }
+    } catch (pickError) {
+      setError(pickError instanceof Error ? pickError.message : "無法開啟資料夾選擇器。");
+    } finally {
+      setFreeLoadingFolders(false);
+    }
+  }
+
 
   function toggleFolderPreset(name: string) {
     setFolderPresets((current) => (
@@ -685,88 +779,185 @@ export default function App() {
             </div>
             <fieldset className="storage-destination">
               <legend>案件儲存位置</legend>
-              <div className="destination-selects">
-                <label>
-                  <span>月份資料夾</span>
-                  <select
-                    aria-label="月份資料夾"
-                    value={selectedMonth}
-                    disabled={loadingFolders || !storageTree}
-                    onChange={(event) => chooseMonth(event.target.value)}
-                  >
-                    {[...new Set([
-                      ...(storageTree?.target_month ? [storageTree.target_month] : []),
-                      ...(storageTree?.months.map((item) => item.name) ?? []),
-                    ])].map((name) => <option key={name} value={name}>{name}</option>)}
-                  </select>
-                </label>
-                <label>
-                  <span>子目錄</span>
-                  <select
-                    aria-label="儲存子目錄"
-                    value={selectedSubfolder}
-                    disabled={loadingFolders || !selectedMonthEntry?.subfolders.length}
-                    onChange={(event) => setSelectedSubfolder(event.target.value)}
-                  >
-                    {!selectedMonthEntry?.subfolders.length && <option value="">尚無子目錄</option>}
-                    {selectedMonthEntry?.subfolders.map((name) => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                  </select>
-                </label>
+              <div className="storage-mode-tabs" role="tablist">
                 <button
                   type="button"
-                  className="scan-button"
-                  disabled={loadingFolders}
-                  onClick={() => loadStorageTree(workDate, selectedMonth, selectedSubfolder, material)}
+                  role="tab"
+                  aria-selected={storageMode === "month"}
+                  className={`mode-tab ${storageMode === "month" ? "active" : ""}`}
+                  onClick={() => setStorageMode("month")}
                 >
-                  {loadingFolders ? "掃描中…" : "重新掃描"}
+                  月份模式
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={storageMode === "free"}
+                  className={`mode-tab ${storageMode === "free" ? "active" : ""}`}
+                  onClick={() => setStorageMode("free")}
+                >
+                  自由路徑
                 </button>
               </div>
 
-              {!selectedMonthEntry && storageTree && (
-                <div className="folder-warning" role="status">
-                  找不到「{selectedMonth}」資料夾，請先選擇要一起建立的子目錄。
-                </div>
-              )}
+              {storageMode === "month" ? (
+                <>
+                  <div className="destination-selects">
+                    <label>
+                      <span>月份資料夾</span>
+                      <select
+                        aria-label="月份資料夾"
+                        value={selectedMonth}
+                        disabled={loadingFolders || !storageTree}
+                        onChange={(event) => chooseMonth(event.target.value)}
+                      >
+                        {[...new Set([
+                          ...(storageTree?.target_month ? [storageTree.target_month] : []),
+                          ...(storageTree?.months.map((item) => item.name) ?? []),
+                        ])].map((name) => <option key={name} value={name}>{name}</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      <span>子目錄</span>
+                      <select
+                        aria-label="儲存子目錄"
+                        value={selectedSubfolder}
+                        disabled={loadingFolders || !selectedMonthEntry?.subfolders.length}
+                        onChange={(event) => setSelectedSubfolder(event.target.value)}
+                      >
+                        {!selectedMonthEntry?.subfolders.length && <option value="">尚無子目錄</option>}
+                        {selectedMonthEntry?.subfolders.map((name) => (
+                          <option key={name} value={name}>{name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="scan-button"
+                      disabled={loadingFolders}
+                      onClick={() => loadStorageTree(workDate, selectedMonth, selectedSubfolder, material)}
+                    >
+                      {loadingFolders ? "掃描中…" : "重新掃描"}
+                    </button>
+                  </div>
 
-              {(showFolderCreator || !selectedMonthEntry) ? (
-                <div className="folder-creator">
-                  <span>常用子目錄（可複選）</span>
-                  <div className="folder-presets">
-                    {references.materials.map((name) => (
-                      <label key={name}>
+                  {!selectedMonthEntry && storageTree && (
+                    <div className="folder-warning" role="status">
+                      找不到「{selectedMonth}」資料夾，請先選擇要一起建立的子目錄。
+                    </div>
+                  )}
+
+                  {(showFolderCreator || !selectedMonthEntry) ? (
+                    <div className="folder-creator">
+                      <span>常用子目錄（可複選）</span>
+                      <div className="folder-presets">
+                        {references.materials.map((name) => (
+                          <label key={name}>
+                            <input
+                              type="checkbox"
+                              checked={folderPresets.includes(name)}
+                              onChange={() => toggleFolderPreset(name)}
+                            />
+                            {name}
+                          </label>
+                        ))}
+                      </div>
+                      <div className="folder-custom-row">
+                        <input
+                          aria-label="自訂子目錄名稱"
+                          maxLength={80}
+                          value={customFolderName}
+                          onChange={(event) => setCustomFolderName(event.target.value)}
+                          placeholder="例如 模組、其他設備"
+                        />
+                        <button type="button" disabled={creatingFolders} onClick={createFolders}>
+                          {creatingFolders ? "建立中…" : `建立 ${selectedMonth || "月份"}與子目錄`}
+                        </button>
+                        {selectedMonthEntry && (
+                          <button type="button" onClick={() => setShowFolderCreator(false)}>取消</button>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <button type="button" className="add-folder-button" onClick={() => setShowFolderCreator(true)}>
+                      ＋ 新增子目錄
+                    </button>
+                  )}
+                </>
+              ) : (
+                <div className="free-path-panel">
+                  <div className="free-path-row">
+                    <input
+                      aria-label="掃描路徑"
+                      className="free-path-input"
+                      value={freeScanPath}
+                      onChange={(event) => setFreeScanPath(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void scanFreeDirectory(freeScanPath);
+                        }
+                      }}
+                      placeholder="貼上完整路徑，例如 H:\桃隆消防\材料更換照片"
+                      disabled={freeLoadingFolders}
+                    />
+                    <button
+                      type="button"
+                      onClick={chooseFreeFolder}
+                      disabled={freeLoadingFolders}
+                    >
+                      選擇
+                    </button>
+                    <button
+                      type="button"
+                      className="scan-button"
+                      onClick={() => scanFreeDirectory(freeScanPath)}
+                      disabled={freeLoadingFolders}
+                    >
+                      {freeLoadingFolders ? "掃描中…" : "掃描"}
+                    </button>
+                  </div>
+
+                  {freeScanResult && (
+                    <>
+                      {freeScanResult.subfolders.length === 0 ? (
+                        <div className="folder-warning" role="status">此路徑沒有子目錄。</div>
+                      ) : (
+                        <div className="free-subfolder-list" role="radiogroup" aria-label="選擇子目錄">
+                          {freeScanResult.subfolders.map((name) => (
+                            <label key={name} className={`free-subfolder-item ${freeSelectedSubfolder === name ? "active" : ""}`}>
+                              <input
+                                type="radio"
+                                name="free-subfolder"
+                                value={name}
+                                checked={freeSelectedSubfolder === name}
+                                onChange={() => setFreeSelectedSubfolder(name)}
+                              />
+                              {name}
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                      <label className="free-date-toggle">
                         <input
                           type="checkbox"
-                          checked={folderPresets.includes(name)}
-                          onChange={() => toggleFolderPreset(name)}
+                          checked={freeWithDate}
+                          onChange={(event) => setFreeWithDate(event.target.checked)}
                         />
-                        {name}
+                        加入今日日期前綴
                       </label>
-                    ))}
-                  </div>
-                  <div className="folder-custom-row">
-                    <input
-                      aria-label="自訂子目錄名稱"
-                      maxLength={80}
-                      value={customFolderName}
-                      onChange={(event) => setCustomFolderName(event.target.value)}
-                      placeholder="例如 模組、其他設備"
-                    />
-                    <button type="button" disabled={creatingFolders} onClick={createFolders}>
-                      {creatingFolders ? "建立中…" : `建立 ${selectedMonth || "月份"}與子目錄`}
-                    </button>
-                    {selectedMonthEntry && (
-                      <button type="button" onClick={() => setShowFolderCreator(false)}>取消</button>
-                    )}
-                  </div>
+                      {freeSelectedSubfolder && (
+                        <div className="free-subfolder-preview">
+                          <span>將存入子目錄</span>
+                          <code>{freeSelectedSubfolder}</code>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
-              ) : (
-                <button type="button" className="add-folder-button" onClick={() => setShowFolderCreator(true)}>
-                  ＋ 新增子目錄
-                </button>
               )}
             </fieldset>
+
             <div className="field-grid">
               <label><span>維修日期</span><input type="date" value={workDate} onChange={(event) => setWorkDate(event.target.value)} required /></label>
               <label><span>樓層</span><input value={floor} onChange={(event) => setFloor(event.target.value)} placeholder="例如 3F、B2" required /></label>
