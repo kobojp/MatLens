@@ -39,6 +39,7 @@ from .storage import (
     create_storage_folders,
     get_case,
     list_cases,
+    rescan_case_locations,
     resolve_free_destination,
     scan_directory_subfolders,
     scan_storage_tree,
@@ -252,14 +253,35 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         q: str = Query(default="", max_length=100),
         building: str = Query(default="", max_length=40),
         material: str = Query(default="", max_length=40),
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=20, ge=1, le=100),
     ) -> dict[str, object]:
-        items = list_cases(
+        items, total = list_cases(
             app.state.database_path,
             query=q.strip(),
             building=building.strip(),
             material=material.strip(),
+            limit=page_size,
+            offset=(page - 1) * page_size,
         )
-        return {"items": items, "total": len(items)}
+        pages = max(1, (total + page_size - 1) // page_size)
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "pages": pages,
+        }
+
+    @app.post("/api/cases/rescan")
+    def cases_rescan(path: str = Query(..., max_length=1000)) -> dict[str, int]:
+        target = Path(path.strip()).expanduser()
+        if not target.is_absolute():
+            raise HTTPException(status_code=422, detail="掃描路徑必須使用完整絕對路徑")
+        try:
+            return rescan_case_locations(app.state.database_path, target)
+        except StorageError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
 
     @app.get("/api/cases/{case_id}")
     def case_detail(case_id: str) -> dict[str, object]:

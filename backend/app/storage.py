@@ -5,15 +5,16 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import uuid
 from collections import Counter, defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from fastapi import UploadFile
 from PIL import Image, UnidentifiedImageError
 
-from .config import ALLOWED_IMAGE_FORMATS, MAX_PHOTO_BYTES, PHOTO_ROLES
+from .config import ALLOWED_IMAGE_FORMATS, BUILDINGS, MAX_PHOTO_BYTES, PHOTO_ROLES
 from .db import connect
 from .schemas import CaseCreate
 
@@ -177,8 +178,9 @@ def resolve_free_destination(scan_root: Path, subfolder: str) -> Path:
 
 
 def completeness(roles: list[str]) -> dict[str, object]:
-    required = ["前", "中", "完成"]
-    missing = [role for role in required if role not in roles]
+    missing = [role for role in ["前", "中"] if role not in roles]
+    if not ({"後", "完成"} & set(roles)):
+        missing.append("後／完成")
     return {"is_complete": not missing, "missing_roles": missing}
 
 
@@ -460,8 +462,9 @@ def list_cases(
     query: str = "",
     building: str = "",
     material: str = "",
-    limit: int = 100,
-) -> list[dict[str, object]]:
+    limit: int = 20,
+    offset: int = 0,
+) -> tuple[list[dict[str, object]], int]:
     clauses: list[str] = []
     parameters: list[object] = []
     if query:
@@ -479,11 +482,16 @@ def list_cases(
         parameters.append(material)
 
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    parameters.append(limit)
     with connect(database_path) as connection:
+        total = int(
+            connection.execute(
+                f"SELECT COUNT(*) FROM cases {where}", parameters
+            ).fetchone()[0]
+        )
         rows = connection.execute(
-            f"SELECT * FROM cases {where} ORDER BY work_date DESC, created_at DESC LIMIT ?",
-            parameters,
+            f"SELECT * FROM cases {where} "
+            "ORDER BY work_date DESC, created_at DESC LIMIT ? OFFSET ?",
+            [*parameters, limit, offset],
         ).fetchall()
         results: list[dict[str, object]] = []
         for row in rows:
@@ -491,4 +499,303 @@ def list_cases(
                 "SELECT role FROM photos WHERE case_id = ? ORDER BY sequence", (row["id"],)
             ).fetchall()
             results.append(_case_row_to_dict(row, [role["role"] for role in role_rows]))
-    return results
+    return results, total
+
+
+SCANNED_PHOTO_RE = re.compile(
+    rf"^(?P<sequence>\d+)_"
+    rf"(?P<role>{'|'.join(re.escape(role) for role in PHOTO_ROLES)})"
+    r"(?:-\d+)?\.(?:jpe?g|png|webp)$",
+    re.IGNORECASE,
+)
+
+
+def _case_from_folder(folder: Path) -> CaseCreate | None:
+    folder_name = folder.name
+    if re.match(r"^\d{4}-\d{2}-\d{2}_", folder_name):
+        folder_name = folder_name.replace("_", " ")
+    dated = re.match(r"^(\d{4}-\d{2}-\d{2})\s+(.+)$", folder_name)
+    try:
+        if dated:
+            work_date = date.fromisoformat(dated.group(1))
+            remainder = dated.group(2)
+        else:
+            work_date = datetime.fromtimestamp(folder.stat().st_mtime).date()
+            remainder = folder_name
+
+        building = next(
+            (
+                value
+                for value in sorted(BUILDINGS, key=len, reverse=True)
+                if remainder == value or remainder.startswith(f"{value} ")
+            ),
+            "",
+        )
+        if building:
+            details = remainder[len(building) :].strip().split(maxsplit=2)
+        else:
+            first, *details = remainder.split(maxsplit=1)
+            building = first
+            details = details[0].split(maxsplit=2) if details else []
+        if len(details) != 3:
+            return None
+        floor, address_code, issue_text = details
+        issues = [item for item in issue_text.split("-") if item]
+        if not issues:
+            return None
+        return CaseCreate(
+            work_date=work_date,
+            building=building,
+            floor=floor,
+            address_code=address_code,
+            material=folder.parent.name,
+            issues=issues,
+        )
+    except (OSError, ValueError):
+        return None
+
+
+def _fallback_case_from_folder(folder: Path) -> CaseCreate | None:
+    try:
+        return CaseCreate(
+            work_date=datetime.fromtimestamp(folder.stat().st_mtime).date(),
+            building="未辨識",
+            floor="未辨識",
+            address_code=folder.name[:60],
+            material=folder.parent.name[:40] or "未辨識",
+            issues=["未辨識"],
+        )
+    except (OSError, ValueError):
+        return None
+
+
+def _automatic_roles(count: int) -> list[str]:
+    roles = ["中"] * count
+    if count:
+        roles[0] = "前"
+    if count >= 2:
+        roles[-1] = "完成"
+    if count >= 4:
+        roles[-2] = "後"
+    return roles
+
+
+def _photos_from_folder(folder: Path) -> list[dict[str, object]]:
+    photos: list[dict[str, object]] = []
+    try:
+        files = sorted(folder.iterdir(), key=lambda path: path.name.casefold())
+    except OSError:
+        return []
+    for path in files:
+        match = SCANNED_PHOTO_RE.fullmatch(path.name)
+        if (
+            path.suffix.casefold() not in {".jpg", ".jpeg", ".png", ".webp"}
+            or not path.is_file()
+        ):
+            continue
+        try:
+            with path.open("rb") as photo_file:
+                digest = hashlib.file_digest(photo_file, "sha256").hexdigest()
+            with Image.open(path) as image:
+                image.verify()
+            with Image.open(path) as image:
+                image_format = (image.format or "").upper()
+                width, height = image.size
+            if image_format not in ALLOWED_IMAGE_FORMATS or width < 1 or height < 1:
+                continue
+            photos.append(
+                {
+                    "sequence": int(match.group("sequence")) if match else len(photos) + 1,
+                    "role": match.group("role") if match else "",
+                    "stored_name": path.name,
+                    "sha256": digest,
+                    "size_bytes": path.stat().st_size,
+                    "width": width,
+                    "height": height,
+                }
+            )
+        except (OSError, UnidentifiedImageError):
+            continue
+    photos.sort(
+        key=lambda photo: (int(photo["sequence"]), str(photo["stored_name"]).casefold())
+    )
+    defaults = _automatic_roles(len(photos))
+    for sequence, photo in enumerate(photos, start=1):
+        photo["sequence"] = sequence
+        if not photo["role"]:
+            photo["role"] = defaults[sequence - 1]
+    return photos
+
+
+def rescan_case_locations(database_path: Path, scan_root: Path) -> dict[str, int]:
+    """Relink missing registered case folders found uniquely under the selected root."""
+    root = scan_root.resolve()
+    if not root.is_dir():
+        raise StorageError("掃描路徑不存在或不是資料夾")
+
+    with connect(database_path) as connection:
+        cases = connection.execute(
+            "SELECT id, storage_root, folder_path FROM cases"
+        ).fetchall()
+        cases_to_relink = []
+        unchanged = 0
+        for case in cases:
+            old_root = Path(case["storage_root"]).resolve()
+            if old_root == root and (root / case["folder_path"]).is_dir():
+                unchanged += 1
+            else:
+                cases_to_relink.append(case)
+
+        wanted_names = {Path(case["folder_path"]).name.casefold() for case in cases_to_relink}
+        matches: dict[str, list[Path]] = defaultdict(list)
+        scanned_directories: list[Path] = []
+        for current, directory_names, _ in os.walk(root, followlinks=False):
+            directory_names[:] = [
+                name for name in directory_names if not name.startswith(".")
+            ]
+            current_path = Path(current)
+            if current_path != root:
+                scanned_directories.append(current_path)
+            if wanted_names:
+                for name in directory_names:
+                    if name.casefold() in wanted_names:
+                        matches[name.casefold()].append(current_path / name)
+
+        relinked = 0
+        ambiguous = 0
+        unresolved = 0
+        removed = 0
+        blocked_import_names: set[str] = set()
+        for case in cases_to_relink:
+            candidates = matches.get(Path(case["folder_path"]).name.casefold(), [])
+            photo_rows = connection.execute(
+                "SELECT stored_name FROM photos WHERE case_id = ? ORDER BY sequence",
+                (case["id"],),
+            ).fetchall()
+            candidates = [
+                candidate
+                for candidate in candidates
+                if all((candidate / photo["stored_name"]).is_file() for photo in photo_rows)
+            ]
+            if len(candidates) != 1:
+                case_name = Path(case["folder_path"]).name.casefold()
+                if len(candidates) > 1:
+                    ambiguous += 1
+                    blocked_import_names.add(case_name)
+                else:
+                    old_folder = Path(case["storage_root"]).resolve() / case["folder_path"]
+                    if old_folder.is_dir():
+                        unresolved += 1
+                        blocked_import_names.add(case_name)
+                    else:
+                        connection.execute("DELETE FROM cases WHERE id = ?", (case["id"],))
+                        removed += 1
+                continue
+
+            relative_folder = candidates[0].relative_to(root).as_posix()
+            try:
+                connection.execute(
+                    "UPDATE cases SET storage_root = ?, folder_path = ? WHERE id = ?",
+                    (str(root), relative_folder, case["id"]),
+                )
+                for photo in photo_rows:
+                    connection.execute(
+                        "UPDATE photos SET stored_path = ? WHERE case_id = ? AND stored_name = ?",
+                        (
+                            (Path(relative_folder) / photo["stored_name"]).as_posix(),
+                            case["id"],
+                            photo["stored_name"],
+                        ),
+                    )
+                relinked += 1
+            except sqlite3.IntegrityError:
+                ambiguous += 1
+
+        registered_paths = {
+            (Path(row["storage_root"]).resolve() / row["folder_path"]).resolve()
+            for row in connection.execute("SELECT storage_root, folder_path FROM cases")
+        }
+        imported = 0
+        skipped = 0
+        for folder in scanned_directories:
+            resolved_folder = folder.resolve()
+            if (
+                resolved_folder in registered_paths
+                or folder.name.casefold() in blocked_import_names
+            ):
+                continue
+            photos = _photos_from_folder(folder)
+            if not photos:
+                continue
+            case = _case_from_folder(folder) or _fallback_case_from_folder(folder)
+            if case is None:
+                continue
+            relative_folder = folder.relative_to(root).as_posix()
+            case_id = str(uuid.uuid4())
+            connection.execute("SAVEPOINT import_case")
+            try:
+                created_at = datetime.fromtimestamp(folder.stat().st_mtime, UTC).isoformat()
+                connection.execute(
+                    """
+                    INSERT INTO cases (
+                        id, work_date, building, floor, address_code, material,
+                        issues_json, location, notes, storage_root, folder_path,
+                        photo_count, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?, ?)
+                    """,
+                    (
+                        case_id,
+                        case.work_date.isoformat(),
+                        case.building,
+                        case.floor,
+                        case.address_code,
+                        case.material,
+                        json.dumps(case.issues, ensure_ascii=False),
+                        str(root),
+                        relative_folder,
+                        len(photos),
+                        created_at,
+                    ),
+                )
+                for photo in photos:
+                    stored_name = str(photo["stored_name"])
+                    connection.execute(
+                        """
+                        INSERT INTO photos (
+                            id, case_id, role, sequence, original_name, stored_name,
+                            stored_path, sha256, size_bytes, width, height
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            str(uuid.uuid4()),
+                            case_id,
+                            photo["role"],
+                            photo["sequence"],
+                            stored_name,
+                            stored_name,
+                            (Path(relative_folder) / stored_name).as_posix(),
+                            photo["sha256"],
+                            photo["size_bytes"],
+                            photo["width"],
+                            photo["height"],
+                        ),
+                    )
+                connection.execute("RELEASE SAVEPOINT import_case")
+                registered_paths.add(resolved_folder)
+                imported += 1
+            except (OSError, sqlite3.IntegrityError):
+                connection.execute("ROLLBACK TO SAVEPOINT import_case")
+                connection.execute("RELEASE SAVEPOINT import_case")
+                skipped += 1
+        connection.commit()
+
+    return {
+        "registered": len(cases),
+        "unchanged": unchanged,
+        "relinked": relinked,
+        "imported": imported,
+        "removed": removed,
+        "unresolved": unresolved,
+        "ambiguous": ambiguous,
+        "skipped": skipped,
+    }

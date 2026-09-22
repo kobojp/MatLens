@@ -135,6 +135,8 @@ legend { margin-bottom: 7px; color: #5e6d75; font-size: 12px; }
 .list-header p { margin: 5px 0 0; color: #728087; font-size: 12px; }
 .list-filters { display: flex; gap: 8px; }
 .list-filters input { min-width: 230px; }
+.list-filters .rescan-cases { border: 1px solid #c6372c; border-radius: 6px; padding: 7px 10px; color: #fff; background: #c6372c; white-space: nowrap; }
+.list-filters .rescan-cases:disabled { cursor: wait; opacity: .6; }
 .case-table-wrap { overflow-x: auto; }
 .case-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .case-table th { padding: 9px 10px; color: #708087; border-bottom: 1px solid #d7e0e4; text-align: left; font-size: 11px; font-weight: 600; }
@@ -147,6 +149,10 @@ legend { margin-bottom: 7px; color: #5e6d75; font-size: 12px; }
 .row-actions { white-space: nowrap; text-align: right; }
 .row-actions button { border: 0; padding: 5px 7px; color: #8f3029; background: transparent; font-size: 12px; }
 .empty-row { height: 90px; color: #7b878e; text-align: center; }
+.case-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 12px; color: #6d7b82; font-size: 12px; }
+.case-pagination div { display: flex; gap: 6px; }
+.case-pagination button { border: 1px solid #ccd6db; border-radius: 6px; padding: 6px 10px; color: #8f3029; background: #fff; }
+.case-pagination button:disabled { cursor: default; opacity: .4; }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 24px; background: rgba(18, 25, 29, .72); }
 .case-modal { width: min(1080px, 100%); max-height: calc(100vh - 48px); overflow-y: auto; background: #fff; border-radius: 10px; box-shadow: 0 22px 70px rgba(0,0,0,.3); }
@@ -181,7 +187,7 @@ legend { margin-bottom: 7px; color: #5e6d75; font-size: 12px; }
   .case-editor { border-top: 1px solid #dbe2e6; }
   .list-header { align-items: stretch; flex-direction: column; }
   .list-filters { display: grid; grid-template-columns: 1fr 1fr; }
-  .list-filters input { grid-column: 1 / -1; min-width: 0; }
+  .list-filters input, .list-filters .rescan-cases { grid-column: 1 / -1; min-width: 0; }
 }
 
 @media (max-width: 470px) {

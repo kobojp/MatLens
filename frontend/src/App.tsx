@@ -68,7 +68,7 @@ const FALLBACK_REFERENCES: ReferenceValues = {
   buildings: ["二門診", "三門診", "思源", "致德", "身障", "長青", "立體", "臨床"],
   materials: ["底座", "探頭", "模組", "磁力門扣"],
   issues: ["錯誤設備", "無回應", "火警", "漏水", "自檢異常", "鏽蝕", "故障"],
-  photo_roles: ["前", "中", "完成", "樓層", "位置", "設備標籤", "其他"],
+  photo_roles: ["前", "中", "後", "完成", "樓層", "位置", "設備標籤", "其他"],
   custom_materials: [],
   custom_issues: [],
 };
@@ -83,11 +83,12 @@ function initialRoles(count: number): string[] {
   if (count === 1) return ["前"];
   if (count === 2) return ["前", "完成"];
   if (count === 3) return ["前", "中", "完成"];
-  if (count === 4) return ["前", "中", "中", "完成"];
-  if (count === 5) return ["前", "中", "中", "完成", "樓層"];
+  if (count === 4) return ["前", "中", "後", "完成"];
+  if (count === 5) return ["前", "中", "後", "完成", "樓層"];
   return Array.from({ length: count }, (_, index) => {
     if (index === 0) return "前";
     if (index === count - 1) return "完成";
+    if (index === count - 2) return "後";
     return "中";
   });
 }
@@ -135,6 +136,10 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [caseBuilding, setCaseBuilding] = useState("");
   const [caseMaterial, setCaseMaterial] = useState("");
+  const [casePage, setCasePage] = useState(1);
+  const [caseTotal, setCaseTotal] = useState(0);
+  const [casePages, setCasePages] = useState(1);
+  const [scanningCases, setScanningCases] = useState(false);
   const [selectedCase, setSelectedCase] = useState<CaseRecord | null>(null);
   const [saving, setSaving] = useState(false);
   const [updateInstalling, setUpdateInstalling] = useState(false);
@@ -217,24 +222,36 @@ export default function App() {
 
   const selectedMonthEntry = storageTree?.months.find((item) => item.name === selectedMonth);
 
-  const missingRoles = ["前", "中", "完成"].filter(
+  const missingRoles = ["前", "中"].filter(
     (role) => !photos.some((photo) => photo.role === role),
   );
+  if (!photos.some((photo) => photo.role === "後" || photo.role === "完成")) {
+    missingRoles.push("後／完成");
+  }
 
   const loadCases = useCallback(async () => {
     const params = new URLSearchParams();
     if (query.trim()) params.set("q", query.trim());
     if (caseBuilding) params.set("building", caseBuilding);
     if (caseMaterial) params.set("material", caseMaterial);
+    params.set("page", String(casePage));
+    params.set("page_size", "20");
     try {
       const response = await fetch(`/api/cases?${params}`);
       if (!response.ok) throw new Error();
-      const payload = (await response.json()) as { items: CaseRecord[] };
+      const payload = (await response.json()) as {
+        items: CaseRecord[];
+        total: number;
+        pages: number;
+      };
       setCases(payload.items);
+      setCaseTotal(payload.total);
+      setCasePages(payload.pages);
+      if (casePage > payload.pages) setCasePage(payload.pages);
     } catch {
       setError("無法讀取案件清單，請確認後端正在執行。");
     }
-  }, [query, caseBuilding, caseMaterial]);
+  }, [query, caseBuilding, caseMaterial, casePage]);
 
   const loadStorageTree = useCallback(async (
     date: string,
@@ -425,7 +442,11 @@ export default function App() {
       if (!response.ok) throw new Error(errorText(payload));
       setNotice("案件與照片已安全儲存。");
       clearDraft();
-      await loadCases();
+      if (casePage === 1) {
+        await loadCases();
+      } else {
+        setCasePage(1);
+      }
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "儲存失敗。");
     } finally {
@@ -447,6 +468,52 @@ export default function App() {
   async function openFolder(id: string) {
     const response = await fetch(`/api/cases/${id}/open-folder`, { method: "POST" });
     if (!response.ok) setError("無法開啟案件資料夾。");
+  }
+
+  async function rescanCases() {
+    let scanPath = storageRoot;
+    if (storageMode === "free") {
+      scanPath = freeScanResult?.root || freeScanPath.trim();
+      if (freeScanResult && freeSelectedSubfolder) {
+        const separator = scanPath.includes("\\") ? "\\" : "/";
+        scanPath = `${scanPath.replace(/[\\/]$/, "")}${separator}${freeSelectedSubfolder}`;
+      }
+    }
+    if (!scanPath) {
+      setError("請先選擇要掃描的照片根目錄。");
+      return;
+    }
+    setError("");
+    setNotice("");
+    setScanningCases(true);
+    try {
+      const response = await fetch(`/api/cases/rescan?path=${encodeURIComponent(scanPath)}`, {
+        method: "POST",
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(errorText(payload));
+      const relinked = Number(payload.relinked ?? 0);
+      const imported = Number(payload.imported ?? 0);
+      const removed = Number(payload.removed ?? 0);
+      const pending = Number(payload.unresolved ?? 0) + Number(payload.ambiguous ?? 0) + Number(payload.skipped ?? 0);
+      if (relinked || imported || removed) {
+        const changes = [
+          relinked ? `重新連結 ${relinked} 筆案件` : "",
+          imported ? `新增 ${imported} 筆案件` : "",
+          removed ? `清除 ${removed} 筆失效紀錄` : "",
+        ].filter(Boolean).join("、");
+        setNotice(`掃描完成，已${changes}${pending ? `，另有 ${pending} 筆無法自動確認` : ""}。`);
+      } else if (pending) {
+        setNotice(`掃描完成，有 ${pending} 筆失效路徑找不到唯一符合的資料夾。`);
+      } else {
+        setNotice("掃描完成，案件路徑皆為最新狀態。");
+      }
+      await loadCases();
+    } catch (scanError) {
+      setError(scanError instanceof Error ? scanError.message : "無法掃描案件資料夾。");
+    } finally {
+      setScanningCases(false);
+    }
   }
 
   async function chooseStorageRoot() {
@@ -1062,7 +1129,7 @@ export default function App() {
             <label className="notes-field"><span>備註</span><textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="可記錄漏水原因、缺照原因或其他說明" /></label>
 
             <div className={`completeness ${missingRoles.length ? "warning" : "ready"}`}>
-              <strong>{missingRoles.length ? `缺少：${missingRoles.join("、")}` : "前／中／完成照片齊全"}</strong>
+              <strong>{missingRoles.length ? `缺少：${missingRoles.join("、")}` : "前／中／後（或完成）照片齊全"}</strong>
               <span>{photos.length >= 3 && photos.length <= 5 ? "符合建議的 3～5 張照片" : "一般案件建議使用 3～5 張照片"}</span>
             </div>
           </section>
@@ -1072,9 +1139,12 @@ export default function App() {
           <div className="list-header">
             <div><span className="eyebrow">ARCHIVE</span><h2>案件清單</h2><p>依棟別、定址碼、材料或問題快速尋找</p></div>
             <div className="list-filters">
-              <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜尋定址碼或問題…" aria-label="搜尋案件" />
-              <select value={caseBuilding} onChange={(event) => setCaseBuilding(event.target.value)} aria-label="依棟別篩選"><option value="">全部棟別</option>{references.buildings.map((item) => <option key={item}>{item}</option>)}</select>
-              <select value={caseMaterial} onChange={(event) => setCaseMaterial(event.target.value)} aria-label="依材料篩選"><option value="">全部材料</option>{references.materials.map((item) => <option key={item}>{item}</option>)}</select>
+              <button type="button" className="rescan-cases" onClick={rescanCases} disabled={scanningCases}>
+                {scanningCases ? "掃描中…" : "掃描目前資料夾"}
+              </button>
+              <input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setCasePage(1); }} placeholder="搜尋定址碼或問題…" aria-label="搜尋案件" />
+              <select value={caseBuilding} onChange={(event) => { setCaseBuilding(event.target.value); setCasePage(1); }} aria-label="依棟別篩選"><option value="">全部棟別</option>{references.buildings.map((item) => <option key={item}>{item}</option>)}</select>
+              <select value={caseMaterial} onChange={(event) => { setCaseMaterial(event.target.value); setCasePage(1); }} aria-label="依材料篩選"><option value="">全部材料</option>{references.materials.map((item) => <option key={item}>{item}</option>)}</select>
             </div>
           </div>
           <div className="case-table-wrap">
@@ -1094,6 +1164,13 @@ export default function App() {
               </tbody>
             </table>
           </div>
+          <nav className="case-pagination" aria-label="案件清單分頁">
+            <span>共 {caseTotal} 筆，第 {casePage}／{casePages} 頁</span>
+            <div>
+              <button type="button" disabled={casePage <= 1} onClick={() => setCasePage((page) => page - 1)}>上一頁</button>
+              <button type="button" disabled={casePage >= casePages} onClick={() => setCasePage((page) => page + 1)}>下一頁</button>
+            </div>
+          </nav>
         </section>
       </main>
 
