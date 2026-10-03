@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CaseListSection from "./CaseListSection";
 import CaseModal from "./CaseModal";
 import OptionField from "./OptionField";
+import OverviewModal from "./OverviewModal";
 import PhotoPreview from "./PhotoPreview";
 import StorageDestination from "./StorageDestination";
 import UpdatePanel from "./UpdatePanel";
@@ -36,6 +37,7 @@ export default function App() {
   const [caseTotal, setCaseTotal] = useState(0);
   const [casePages, setCasePages] = useState(1);
   const [scanningCases, setScanningCases] = useState(false);
+  const [overviewView, setOverviewView] = useState<"gallery" | "names" | null>(null);
   const [selectedCase, setSelectedCase] = useState<CaseRecord | null>(null);
   const [saving, setSaving] = useState(false);
   const [updateInstalling, setUpdateInstalling] = useState(false);
@@ -117,6 +119,11 @@ export default function App() {
     return `${selectedMonth || "請選月份"}\\${selectedSubfolder || "請選子目錄"}\\${caseFolder}`;
   }, [workDate, building, floor, addressCode, issues, selectedMonth, selectedSubfolder, storageMode, freeSelectedSubfolder, freeWithDate]);
 
+
+  const destinationSubfolder = storageMode === "free" ? freeSelectedSubfolder : selectedSubfolder;
+  const overviewDefaultMaterial = references.materials.includes(destinationSubfolder)
+    ? destinationSubfolder
+    : material;
 
   const selectedMonthEntry = storageTree?.months.find((item) => item.name === selectedMonth);
 
@@ -359,15 +366,18 @@ export default function App() {
     if (!response.ok) setError("無法開啟案件資料夾。");
   }
 
-  async function rescanCases() {
-    let scanPath = storageRoot;
-    if (storageMode === "free") {
-      scanPath = freeScanResult?.root || freeScanPath.trim();
-      if (freeScanResult && freeSelectedSubfolder) {
-        const separator = scanPath.includes("\\") ? "\\" : "/";
-        scanPath = `${scanPath.replace(/[\\/]$/, "")}${separator}${freeSelectedSubfolder}`;
-      }
+  function currentScanPath(): string {
+    if (storageMode !== "free") return storageRoot;
+    let scanPath = freeScanResult?.root || freeScanPath.trim();
+    if (freeScanResult && freeSelectedSubfolder) {
+      const separator = scanPath.includes("\\") ? "\\" : "/";
+      scanPath = `${scanPath.replace(/[\\/]$/, "")}${separator}${freeSelectedSubfolder}`;
     }
+    return scanPath;
+  }
+
+  async function rescanCases() {
+    const scanPath = currentScanPath();
     if (!scanPath) {
       setError("請先選擇要掃描的照片根目錄。");
       return;
@@ -865,10 +875,22 @@ export default function App() {
           onMaterialChange={(value) => { setCaseMaterial(value); setCasePage(1); }}
           onPageChange={setCasePage}
           onRescan={rescanCases}
+          onOpenOverview={setOverviewView}
           onView={viewCase}
           onOpenFolder={openFolder}
         />
       </main>
+
+      {overviewView && (
+        <OverviewModal
+          buildings={references.buildings}
+          materials={references.materials}
+          defaultMaterial={overviewDefaultMaterial}
+          scanPath={currentScanPath()}
+          initialView={overviewView}
+          onClose={() => setOverviewView(null)}
+        />
+      )}
 
       {selectedCase && <CaseModal selectedCase={selectedCase} onClose={() => setSelectedCase(null)} />}
     </div>

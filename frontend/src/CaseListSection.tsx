@@ -16,6 +16,7 @@ type Props = {
   onMaterialChange: (value: string) => void;
   onPageChange: (updater: (page: number) => number) => void;
   onRescan: () => void;
+  onOpenOverview: (view: "gallery" | "names") => void;
   onView: (id: string) => void;
   onOpenFolder: (id: string) => void;
 };
@@ -29,6 +30,12 @@ export default function CaseListSection(props: Props) {
         <div className="list-filters">
           <button type="button" className="rescan-cases" onClick={props.onRescan} disabled={scanning}>
             {scanning ? "掃描中…" : "掃描目前資料夾"}
+          </button>
+          <button type="button" className="overview-open" onClick={() => props.onOpenOverview("gallery")}>
+            照片總覽
+          </button>
+          <button type="button" className="overview-open" onClick={() => props.onOpenOverview("names")}>
+            檔名清單
           </button>
           <input type="search" value={query} onChange={(event) => props.onQueryChange(event.target.value)} placeholder="搜尋定址碼或問題…" aria-label="搜尋案件" />
           <select value={caseBuilding} onChange={(event) => props.onBuildingChange(event.target.value)} aria-label="依棟別篩選"><option value="">全部棟別</option>{buildings.map((item) => <option key={item}>{item}</option>)}</select>

@@ -239,3 +239,37 @@ legend { margin-bottom: 7px; color: #5e6d75; font-size: 12px; }
 .free-date-toggle input[type="checkbox"] { accent-color: #c6372c; width: 15px; height: 15px; }
 .free-subfolder-preview { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: #f0f8f2; border: 1px solid #c2e0cc; border-radius: 6px; font-size: 12px; color: #2d5237; }
 .free-subfolder-preview code { font-size: 12px; }
+
+.list-filters .overview-open { border: 1px solid #1f6f5c; border-radius: 6px; padding: 7px 10px; color: #fff; background: #1f6f5c; white-space: nowrap; }
+.overview-modal { position: relative; display: flex; flex-direction: column; width: min(1280px, 100%); height: calc(100vh - 48px); background: #fff; border-radius: 10px; box-shadow: 0 22px 70px rgba(0,0,0,.3); overflow: hidden; }
+.overview-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 19px; border-bottom: 1px solid #dce3e6; }
+.overview-header h2 { margin: 2px 0 0; font-size: 20px; }
+.overview-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 10px 19px 4px; }
+.overview-toolbar label { display: grid; gap: 3px; font-size: 12px; color: #5d6b72; }
+.overview-toolbar select { border: 1px solid #cbd5da; border-radius: 6px; padding: 7px 9px; color: #1e2a30; background: #fff; }
+.overview-tabs { display: flex; margin-left: auto; }
+.overview-tabs button { border: 1px solid #cbd5da; padding: 7px 14px; background: #fff; }
+.overview-tabs button.active { color: #fff; background: #1f6f5c; border-color: #1f6f5c; }
+.overview-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 19px 10px; border-bottom: 1px solid #e6ecee; }
+.overview-autoscan { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #44525a; }
+.overview-spacer { flex: 1; }
+.overview-body { flex: 1; overflow-y: auto; padding: 14px 19px 22px; background: #f4f7f8; }
+.overview-empty { color: #6e7c83; }
+.overview-case { margin-bottom: 14px; padding: 11px 14px; background: #fff; border: 1px solid #dce3e6; border-radius: 8px; }
+.overview-case h3 { margin: 0 0 8px; font-size: 16px; }
+.overview-case h3 small { margin-left: 10px; font-weight: 400; font-size: 12px; color: #6e7c83; }
+.overview-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.overview-row figure { width: var(--thumb, 180px); margin: 0; }
+.overview-row figure button { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
+.overview-row img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 5px; background: #e3e9eb; }
+.overview-row figcaption { margin-top: 3px; font-size: 12px; color: #44525a; word-break: break-all; }
+.overview-names { display: grid; gap: 10px; }
+.overview-names textarea { width: 100%; min-height: 55vh; padding: 12px; border: 1px solid #cbd5da; border-radius: 6px; font: 14px/1.55 Consolas, "Microsoft JhengHei", monospace; resize: vertical; }
+.overview-names div { display: flex; align-items: center; gap: 12px; font-size: 13px; color: #5d6b72; }
+.overview-lightbox { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; gap: 14px; background: rgba(10, 15, 18, .88); }
+.overview-lightbox figure { max-width: 86%; margin: 0; text-align: center; color: #fff; }
+.overview-lightbox img { max-width: 100%; max-height: calc(100vh - 150px); border-radius: 4px; }
+.overview-lightbox figcaption { margin-top: 8px; font-size: 14px; }
+.overview-lightbox > button { width: 44px; height: 44px; border: 0; border-radius: 50%; font-size: 26px; color: #fff; background: rgba(255,255,255,.18); }
+.overview-lightbox > button:disabled { opacity: .3; }
+.overview-lightbox > .overview-lightbox-close { position: absolute; top: 14px; right: 16px; }

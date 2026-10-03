@@ -59,3 +59,26 @@ export type FreeScanResult = {
 export type StorageMode = "month" | "free";
 
 export type CustomOptionKind = "material" | "issue";
+
+export type OverviewPhoto = {
+  name: string;
+  role: string;
+  url: string;
+  thumb_url: string;
+};
+
+export type OverviewCase = {
+  id: string;
+  title: string;
+  work_date: string;
+  material: string;
+  building: string;
+  photos: OverviewPhoto[];
+};
+
+export type OverviewData = {
+  source: "db" | "disk";
+  total: number;
+  filenames: string;
+  cases: OverviewCase[];
+};
