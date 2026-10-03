@@ -228,9 +228,12 @@ describe("照片拖放", () => {
   });
 
   it("月份不存在時可批次建立常用與自訂子目錄", async () => {
+    const missingMonthNumber = new Date().getMonth() === 9 ? 11 : 10;
+    const missingMonth = `${missingMonthNumber}月`;
+    const missingMonthDate = `2026-${missingMonthNumber}-05`;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      const requestedMonth = url.includes("2026-10-05") ? "10月" : currentMonth;
+      const requestedMonth = url.includes(missingMonthDate) ? missingMonth : currentMonth;
       const isCreated = fetchMock.mock.calls.some(([, options]) => options?.method === "POST");
       const payload = url.includes("reference-values")
         ? references
@@ -238,13 +241,13 @@ describe("照片拖放", () => {
           ? {
               root: "C:\\MatLens照片",
               target_month: requestedMonth,
-              month_exists: requestedMonth !== "10月" || isCreated,
-              months: requestedMonth === "10月" && !isCreated
+              month_exists: requestedMonth !== missingMonth || isCreated,
+              months: requestedMonth === missingMonth && !isCreated
                 ? storageTree.months
-                : [...storageTree.months, { name: "10月", subfolders: ["底座", "探頭", "模組"] }],
+                : [...storageTree.months, { name: missingMonth, subfolders: ["底座", "探頭", "模組"] }],
             }
           : url.endsWith("settings/storage/folders")
-            ? { root: "C:\\MatLens照片", month: { name: "10月", subfolders: ["底座", "探頭", "模組"] } }
+            ? { root: "C:\\MatLens照片", month: { name: missingMonth, subfolders: ["底座", "探頭", "模組"] } }
             : url.includes("settings/storage")
               ? { path: "C:\\MatLens照片" }
               : { items: [], total: 0, page: 1, page_size: 20, pages: 1 };
@@ -253,15 +256,15 @@ describe("照片拖放", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
 
-    fireEvent.change(screen.getByLabelText("維修日期"), { target: { value: "2026-10-05" } });
-    expect(await screen.findByText(/找不到「10月」資料夾/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("維修日期"), { target: { value: missingMonthDate } });
+    expect(await screen.findByText(new RegExp(`找不到「${missingMonth}」資料夾`))).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("自訂子目錄名稱"), { target: { value: "模組" } });
-    fireEvent.click(screen.getByRole("button", { name: "建立 10月與子目錄" }));
+    fireEvent.click(screen.getByRole("button", { name: `建立 ${missingMonth}與子目錄` }));
 
     await waitFor(() => expect(screen.getByRole("combobox", { name: "儲存子目錄" })).toHaveValue("模組"));
     const createCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("settings/storage/folders"));
     expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({
-      month: "10月",
+      month: missingMonth,
       subfolders: ["底座", "探頭", "模組"],
     });
   });
