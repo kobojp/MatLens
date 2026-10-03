@@ -21,11 +21,16 @@ from desktop.update_core import (
 )
 from desktop.updater import backup_database, swap_program
 from desktop.updates import UpdateService
+from desktop.version import VERSION
+
+_major, _minor, _patch = (int(part) for part in VERSION.split("-")[0].split("."))
+# 永遠比目前版本新的下一個修訂版，升版時測試不需跟著改
+NEWER_VERSION = f"{_major}.{_minor}.{_patch + 1}"
 
 
 def signed_manifest(**overrides):
     private = Ed25519PrivateKey.generate()
-    value = {"version": "0.5.2", "channel": "stable", "platform": "win-x64",
+    value = {"version": NEWER_VERSION, "channel": "stable", "platform": "win-x64",
              "data_compatibility": 1, "size": 3, "sha256": hashlib.sha256(b"abc").hexdigest(),
              "url": "https://example.com/package.zip", "notes": "更新說明", **overrides}
     payload = json.dumps(value).encode()
