@@ -30,8 +30,7 @@ def completeness(roles: list[str]) -> dict[str, object]:
 def _case_folder_name(case: CaseCreate, *, include_date: bool = True) -> str:
     issue_text = "-".join(case.issues)
     parts = [
-        sanitize_component(case.building),
-        sanitize_component(case.floor),
+        sanitize_component(case.building) + sanitize_component(case.floor),
         sanitize_component(case.address_code),
         sanitize_component(issue_text),
     ]

@@ -25,6 +25,36 @@ SCANNED_PHOTO_RE = re.compile(
 )
 
 
+FLOOR_SUFFIX_RE = re.compile(r"^(?P<building>.+?)(?P<floor>B?\d+F|B\d+|RF)$", re.IGNORECASE)
+
+
+def _split_building_details(remainder: str) -> tuple[str, list[str]]:
+    """拆出棟別與 [樓層, 定址碼, 問題]；同時支援「二門診1F」連寫與舊的空白分隔。"""
+    building = next(
+        (
+            value
+            for value in sorted(BUILDINGS, key=len, reverse=True)
+            if remainder.startswith(value)
+        ),
+        "",
+    )
+    if building:
+        rest = remainder[len(building) :]
+        if rest[:1].isspace():
+            return building, rest.strip().split(maxsplit=2)
+        first, *more = rest.split(maxsplit=2)
+        return building, [first, *more] if first else []
+
+    tokens = remainder.split(maxsplit=3)
+    if len(tokens) == 4:
+        return tokens[0], tokens[1:]
+    if len(tokens) == 3:
+        matched = FLOOR_SUFFIX_RE.match(tokens[0])
+        if matched:
+            return matched.group("building"), [matched.group("floor"), *tokens[1:]]
+    return tokens[0] if tokens else "", []
+
+
 def _case_from_folder(folder: Path) -> CaseCreate | None:
     folder_name = folder.name
     if re.match(r"^\d{4}-\d{2}-\d{2}_", folder_name):
@@ -38,20 +68,7 @@ def _case_from_folder(folder: Path) -> CaseCreate | None:
             work_date = datetime.fromtimestamp(folder.stat().st_mtime).date()
             remainder = folder_name
 
-        building = next(
-            (
-                value
-                for value in sorted(BUILDINGS, key=len, reverse=True)
-                if remainder == value or remainder.startswith(f"{value} ")
-            ),
-            "",
-        )
-        if building:
-            details = remainder[len(building) :].strip().split(maxsplit=2)
-        else:
-            first, *details = remainder.split(maxsplit=1)
-            building = first
-            details = details[0].split(maxsplit=2) if details else []
+        building, details = _split_building_details(remainder)
         if len(details) != 3:
             return None
         floor, address_code, issue_text = details

@@ -324,6 +324,8 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
             )
         except (json.JSONDecodeError, ValueError, ValidationError) as error:
             raise HTTPException(status_code=422, detail="案件欄位格式不正確") from error
+        if len(case.issues) != 1:
+            raise HTTPException(status_code=422, detail="問題只能選擇一項")
 
         # 決定儲存根目錄與目的地
         use_free_mode = bool(free_scan_root.strip())

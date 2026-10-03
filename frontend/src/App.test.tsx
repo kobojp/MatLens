@@ -186,6 +186,29 @@ describe("照片拖放", () => {
     expect(dropped.defaultPrevented).toBe(true);
   });
 
+  it("案件資料夾預覽將棟別與樓層連寫，其餘以空白分隔", async () => {
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("維修日期"), { target: { value: "2026-09-21" } });
+    fireEvent.change(screen.getByPlaceholderText("例如 3F、B2"), { target: { value: "1F" } });
+    fireEvent.change(screen.getByPlaceholderText("例如 M3-07"), { target: { value: "M3-07" } });
+
+    expect(await screen.findByText(/2026-09-21 二門診1F M3-07 錯誤設備/)).toBeInTheDocument();
+  });
+
+  it("問題只能單選，選另一項會取代原選項", async () => {
+    render(<App />);
+    const first = screen.getByRole("button", { name: "錯誤設備" });
+    const second = screen.getByRole("button", { name: "無回應" });
+    expect(first).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(second);
+
+    expect(second).toHaveAttribute("aria-pressed", "true");
+    expect(first).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(second);
+    expect(second).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("可新增並立即選用自訂材料", async () => {
     render(<App />);
 

@@ -549,3 +549,53 @@ def test_create_case_free_mode(client: TestClient, tmp_path: Path) -> None:
     saved_folder = (free_root / subfolder / Path(created["folder_path"]).name)
     assert saved_folder.is_dir()
     assert len(list(saved_folder.glob("*.jpg"))) == 3
+
+
+def test_case_folder_name_joins_building_and_floor(
+    client: TestClient, tmp_path: Path
+) -> None:
+    (tmp_path / "photos" / "8月" / "底座").mkdir(parents=True)
+    created = create_case(client, [(10, 20, 30)]).json()
+
+    assert Path(created["folder_path"]).name == "2026-08-17 二門診3F M3-07 錯誤設備"
+
+
+def test_create_case_rejects_multiple_issues(client: TestClient, tmp_path: Path) -> None:
+    (tmp_path / "photos" / "8月" / "底座").mkdir(parents=True)
+    response = client.post(
+        "/api/cases",
+        data={
+            "work_date": "2026-08-17",
+            "building": "二門診",
+            "floor": "3F",
+            "address_code": "M3-07",
+            "material": "底座",
+            "issues": '["錯誤設備", "無回應"]',
+            "photo_roles": '["前"]',
+            "storage_month": "8月",
+            "storage_subfolder": "底座",
+        },
+        files=[("photos", ("p.jpg", jpeg_bytes((1, 2, 3)), "image/jpeg"))],
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "問題只能選擇一項"
+
+
+def test_rescan_parses_joined_building_floor_names(
+    client: TestClient, tmp_path: Path
+) -> None:
+    root = tmp_path / "連寫"
+    for index, name in enumerate(
+        ["2026-09-22 二門診1F M3-07 錯誤設備", "2026-09-22 新大樓B2 D2-01 無回應"]
+    ):
+        folder = root / "底座" / name
+        folder.mkdir(parents=True)
+        (folder / "01_前.jpg").write_bytes(jpeg_bytes((index, 50, 60)))
+
+    assert client.post("/api/cases/rescan", params={"path": str(root)}).json()["imported"] == 2
+    items = {item["address_code"]: item for item in client.get("/api/cases").json()["items"]}
+
+    assert (items["M3-07"]["building"], items["M3-07"]["floor"]) == ("二門診", "1F")
+    assert items["M3-07"]["issues"] == ["錯誤設備"]
+    assert (items["D2-01"]["building"], items["D2-01"]["floor"]) == ("新大樓", "B2")

@@ -101,17 +101,19 @@ export default function App() {
 
   const folderPreview = useMemo(() => {
     const issueText = issues.map(safeName).join("-");
+    // 棟別與樓層連寫（二門診1F），其餘欄位以空白分隔
+    const buildingFloor = `${safeName(building)}${safeName(floor)}`;
     if (storageMode === "free") {
       const subfolder = freeSelectedSubfolder || "請選子目錄";
       // 日期受 freeWithDate 控制，放在案件資料夾名稱中
       const caseParts = freeWithDate
-        ? [workDate, building, floor, addressCode, issueText]
-        : [building, floor, addressCode, issueText];
+        ? [workDate, buildingFloor, addressCode, issueText]
+        : [buildingFloor, addressCode, issueText];
       const caseFolder = caseParts.map(safeName).join(" ");
       return `${subfolder}\\${caseFolder}`;
     }
     // 月份模式：日期永遠在案件資料夾名稱，空白分隔
-    const caseFolder = [workDate, building, floor, addressCode, issueText].map(safeName).join(" ");
+    const caseFolder = [workDate, buildingFloor, addressCode, issueText].map(safeName).join(" ");
     return `${selectedMonth || "請選月份"}\\${selectedSubfolder || "請選子目錄"}\\${caseFolder}`;
   }, [workDate, building, floor, addressCode, issues, selectedMonth, selectedSubfolder, storageMode, freeSelectedSubfolder, freeWithDate]);
 
@@ -265,15 +267,6 @@ export default function App() {
 
   function setPhotoRole(id: string, role: string) {
     setPhotos((current) => current.map((photo) => (photo.id === id ? { ...photo, role } : photo)));
-  }
-
-  function toggleIssue(issue: string) {
-    setIssues((current) => {
-      if (current.includes(issue)) {
-        return current.length === 1 ? current : current.filter((item) => item !== issue);
-      }
-      return [...current, issue];
-    });
   }
 
   function clearDraft() {
@@ -557,7 +550,7 @@ export default function App() {
       if (kind === "material") {
         setMaterial(savedValue);
       } else {
-        setIssues((current) => [...new Set([...current, savedValue])]);
+        setIssues([savedValue]);
       }
       setCustomOptionKind(null);
       setCustomOptionValue("");
@@ -599,10 +592,11 @@ export default function App() {
         setMaterial(references.materials.find((item) => item !== value) ?? "");
       }
       if (kind === "issue") {
-        setIssues((current) => {
-          const remaining = current.filter((item) => item !== value);
-          return remaining.length ? remaining : [references.issues.find((item) => item !== value) ?? ""];
-        });
+        setIssues((current) => (
+          current.includes(value)
+            ? [references.issues.find((item) => item !== value) ?? ""]
+            : current
+        ));
       }
       setNotice(`自訂${label}「${value}」已刪除。`);
     } catch (optionError) {
@@ -806,11 +800,12 @@ export default function App() {
             <OptionField
               kind="issue"
               noun="問題"
-              legend="問題（可複選）"
+              legend="問題"
+              single
               items={references.issues}
               customItems={references.custom_issues}
               isActive={(item) => issues.includes(item)}
-              onSelect={toggleIssue}
+              onSelect={(item) => setIssues([item])}
               deletingOption={deletingOption}
               editing={customOptionKind === "issue"}
               editorValue={customOptionValue}
