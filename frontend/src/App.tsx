@@ -1,124 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import CaseListSection from "./CaseListSection";
+import CaseModal from "./CaseModal";
+import OptionField from "./OptionField";
 import PhotoPreview from "./PhotoPreview";
+import StorageDestination from "./StorageDestination";
 import UpdatePanel from "./UpdatePanel";
-
-type ReferenceValues = {
-  buildings: string[];
-  materials: string[];
-  issues: string[];
-  photo_roles: string[];
-  custom_materials: string[];
-  custom_issues: string[];
-};
-
-type PhotoDraft = {
-  id: string;
-  file: File;
-  url: string;
-  role: string;
-};
-
-type SavedPhoto = {
-  id: string;
-  role: string;
-  stored_name: string;
-  original_name: string;
-  content_url: string;
-};
-
-type CaseRecord = {
-  id: string;
-  work_date: string;
-  building: string;
-  floor: string;
-  address_code: string;
-  material: string;
-  issues: string[];
-  location: string;
-  notes: string;
-  folder_path: string;
-  photo_count: number;
-  is_complete: boolean;
-  missing_roles: string[];
-  photos?: SavedPhoto[];
-};
-
-type StorageMonth = {
-  name: string;
-  subfolders: string[];
-};
-
-type StorageTree = {
-  root: string;
-  target_month: string;
-  month_exists: boolean;
-  months: StorageMonth[];
-};
-
-type FreeScanResult = {
-  root: string;
-  subfolders: string[];
-};
-
-type StorageMode = "month" | "free";
-
-type CustomOptionKind = "material" | "issue";
-
-const FALLBACK_REFERENCES: ReferenceValues = {
-  buildings: ["二門診", "三門診", "思源", "致德", "身障", "長青", "立體", "臨床"],
-  materials: ["底座", "探頭", "模組", "磁力門扣"],
-  issues: ["錯誤設備", "無回應", "火警", "漏水", "自檢異常", "鏽蝕", "故障"],
-  photo_roles: ["前", "中", "後", "完成", "樓層", "位置", "設備標籤", "其他"],
-  custom_materials: [],
-  custom_issues: [],
-};
-
-function localDate(): string {
-  const now = new Date();
-  const offset = now.getTimezoneOffset() * 60_000;
-  return new Date(now.getTime() - offset).toISOString().slice(0, 10);
-}
-
-function initialRoles(count: number): string[] {
-  if (count === 1) return ["前"];
-  if (count === 2) return ["前", "完成"];
-  if (count === 3) return ["前", "中", "完成"];
-  if (count === 4) return ["前", "中", "後", "完成"];
-  if (count === 5) return ["前", "中", "後", "完成", "樓層"];
-  return Array.from({ length: count }, (_, index) => {
-    if (index === 0) return "前";
-    if (index === count - 1) return "完成";
-    if (index === count - 2) return "後";
-    return "中";
-  });
-}
-
-function safeName(value: string): string {
-  return value.replace(/[<>:"/\\|?*\x00-\x1f]/g, "-").replace(/\s+/g, " ").trim();
-}
-
-function roleFileNames(photos: PhotoDraft[]): string[] {
-  const totals = new Map<string, number>();
-  const seen = new Map<string, number>();
-  photos.forEach((photo) => totals.set(photo.role, (totals.get(photo.role) ?? 0) + 1));
-  return photos.map((photo, index) => {
-    const current = (seen.get(photo.role) ?? 0) + 1;
-    seen.set(photo.role, current);
-    const suffix = totals.get(photo.role)! > 1 ? `-${String(current).padStart(2, "0")}` : "";
-    const extension = photo.file.name.split(".").pop()?.toLowerCase() || "jpg";
-    return `${String(index + 1).padStart(2, "0")}_${photo.role}${suffix}.${extension}`;
-  });
-}
-
-function errorText(payload: unknown): string {
-  if (!payload || typeof payload !== "object") return "操作失敗，請稍後再試。";
-  const detail = (payload as { detail?: unknown }).detail;
-  if (typeof detail === "string") return detail;
-  if (detail && typeof detail === "object" && "message" in detail) {
-    return String((detail as { message: unknown }).message);
-  }
-  return "案件資料格式不正確。";
-}
+import type {
+  CaseRecord,
+  CustomOptionKind,
+  FreeScanResult,
+  PhotoDraft,
+  ReferenceValues,
+  StorageMode,
+  StorageTree,
+} from "./types";
+import { FALLBACK_REFERENCES, errorText, initialRoles, localDate, roleFileNames, safeName } from "./utils";
 
 export default function App() {
   const [references, setReferences] = useState(FALLBACK_REFERENCES);
@@ -844,186 +740,39 @@ export default function App() {
               <div><span className="eyebrow">STEP 3</span><h2>案件資料</h2></div>
               <span className="autosave-label">常用選項</span>
             </div>
-            <fieldset className="storage-destination">
-              <legend>案件儲存位置</legend>
-              <div className="storage-mode-tabs" role="tablist">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={storageMode === "month"}
-                  className={`mode-tab ${storageMode === "month" ? "active" : ""}`}
-                  onClick={() => setStorageMode("month")}
-                >
-                  月份模式
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={storageMode === "free"}
-                  className={`mode-tab ${storageMode === "free" ? "active" : ""}`}
-                  onClick={() => setStorageMode("free")}
-                >
-                  自由路徑
-                </button>
-              </div>
-
-              {storageMode === "month" ? (
-                <>
-                  <div className="destination-selects">
-                    <label>
-                      <span>月份資料夾</span>
-                      <select
-                        aria-label="月份資料夾"
-                        value={selectedMonth}
-                        disabled={loadingFolders || !storageTree}
-                        onChange={(event) => chooseMonth(event.target.value)}
-                      >
-                        {[...new Set([
-                          ...(storageTree?.target_month ? [storageTree.target_month] : []),
-                          ...(storageTree?.months.map((item) => item.name) ?? []),
-                        ])].map((name) => <option key={name} value={name}>{name}</option>)}
-                      </select>
-                    </label>
-                    <label>
-                      <span>子目錄</span>
-                      <select
-                        aria-label="儲存子目錄"
-                        value={selectedSubfolder}
-                        disabled={loadingFolders || !selectedMonthEntry?.subfolders.length}
-                        onChange={(event) => setSelectedSubfolder(event.target.value)}
-                      >
-                        {!selectedMonthEntry?.subfolders.length && <option value="">尚無子目錄</option>}
-                        {selectedMonthEntry?.subfolders.map((name) => (
-                          <option key={name} value={name}>{name}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <button
-                      type="button"
-                      className="scan-button"
-                      disabled={loadingFolders}
-                      onClick={() => loadStorageTree(workDate, selectedMonth, selectedSubfolder, material)}
-                    >
-                      {loadingFolders ? "掃描中…" : "重新掃描"}
-                    </button>
-                  </div>
-
-                  {!selectedMonthEntry && storageTree && (
-                    <div className="folder-warning" role="status">
-                      找不到「{selectedMonth}」資料夾，請先選擇要一起建立的子目錄。
-                    </div>
-                  )}
-
-                  {(showFolderCreator || !selectedMonthEntry) ? (
-                    <div className="folder-creator">
-                      <span>常用子目錄（可複選）</span>
-                      <div className="folder-presets">
-                        {references.materials.map((name) => (
-                          <label key={name}>
-                            <input
-                              type="checkbox"
-                              checked={folderPresets.includes(name)}
-                              onChange={() => toggleFolderPreset(name)}
-                            />
-                            {name}
-                          </label>
-                        ))}
-                      </div>
-                      <div className="folder-custom-row">
-                        <input
-                          aria-label="自訂子目錄名稱"
-                          maxLength={80}
-                          value={customFolderName}
-                          onChange={(event) => setCustomFolderName(event.target.value)}
-                          placeholder="例如 模組、其他設備"
-                        />
-                        <button type="button" disabled={creatingFolders} onClick={createFolders}>
-                          {creatingFolders ? "建立中…" : `建立 ${selectedMonth || "月份"}與子目錄`}
-                        </button>
-                        {selectedMonthEntry && (
-                          <button type="button" onClick={() => setShowFolderCreator(false)}>取消</button>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <button type="button" className="add-folder-button" onClick={() => setShowFolderCreator(true)}>
-                      ＋ 新增子目錄
-                    </button>
-                  )}
-                </>
-              ) : (
-                <div className="free-path-panel">
-                  <div className="free-path-row">
-                    <input
-                      aria-label="掃描路徑"
-                      className="free-path-input"
-                      value={freeScanPath}
-                      onChange={(event) => setFreeScanPath(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          void scanFreeDirectory(freeScanPath);
-                        }
-                      }}
-                      placeholder="貼上完整路徑，例如 H:\桃隆消防\材料更換照片"
-                      disabled={freeLoadingFolders}
-                    />
-                    <button
-                      type="button"
-                      onClick={chooseFreeFolder}
-                      disabled={freeLoadingFolders}
-                    >
-                      選擇
-                    </button>
-                    <button
-                      type="button"
-                      className="scan-button"
-                      onClick={() => scanFreeDirectory(freeScanPath)}
-                      disabled={freeLoadingFolders}
-                    >
-                      {freeLoadingFolders ? "掃描中…" : "掃描"}
-                    </button>
-                  </div>
-
-                  {freeScanResult && (
-                    <>
-                      {freeScanResult.subfolders.length === 0 ? (
-                        <div className="folder-warning" role="status">此路徑沒有子目錄。</div>
-                      ) : (
-                        <div className="free-subfolder-list" role="radiogroup" aria-label="選擇子目錄">
-                          {freeScanResult.subfolders.map((name) => (
-                            <label key={name} className={`free-subfolder-item ${freeSelectedSubfolder === name ? "active" : ""}`}>
-                              <input
-                                type="radio"
-                                name="free-subfolder"
-                                value={name}
-                                checked={freeSelectedSubfolder === name}
-                                onChange={() => setFreeSelectedSubfolder(name)}
-                              />
-                              {name}
-                            </label>
-                          ))}
-                        </div>
-                      )}
-                      <label className="free-date-toggle">
-                        <input
-                          type="checkbox"
-                          checked={freeWithDate}
-                          onChange={(event) => setFreeWithDate(event.target.checked)}
-                        />
-                        加入今日日期前綴
-                      </label>
-                      {freeSelectedSubfolder && (
-                        <div className="free-subfolder-preview">
-                          <span>將存入子目錄</span>
-                          <code>{freeSelectedSubfolder}</code>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-            </fieldset>
+            <StorageDestination
+              storageMode={storageMode}
+              setStorageMode={setStorageMode}
+              storageTree={storageTree}
+              selectedMonth={selectedMonth}
+              selectedMonthEntry={selectedMonthEntry}
+              selectedSubfolder={selectedSubfolder}
+              setSelectedSubfolder={setSelectedSubfolder}
+              chooseMonth={chooseMonth}
+              loadingFolders={loadingFolders}
+              loadStorageTree={loadStorageTree}
+              workDate={workDate}
+              material={material}
+              materials={references.materials}
+              showFolderCreator={showFolderCreator}
+              setShowFolderCreator={setShowFolderCreator}
+              folderPresets={folderPresets}
+              toggleFolderPreset={toggleFolderPreset}
+              customFolderName={customFolderName}
+              setCustomFolderName={setCustomFolderName}
+              creatingFolders={creatingFolders}
+              createFolders={createFolders}
+              freeScanPath={freeScanPath}
+              setFreeScanPath={setFreeScanPath}
+              scanFreeDirectory={scanFreeDirectory}
+              freeLoadingFolders={freeLoadingFolders}
+              chooseFreeFolder={chooseFreeFolder}
+              freeScanResult={freeScanResult}
+              freeSelectedSubfolder={freeSelectedSubfolder}
+              setFreeSelectedSubfolder={setFreeSelectedSubfolder}
+              freeWithDate={freeWithDate}
+              setFreeWithDate={setFreeWithDate}
+            />
 
             <div className="field-grid">
               <label><span>維修日期</span><input type="date" value={workDate} onChange={(event) => setWorkDate(event.target.value)} required /></label>
@@ -1034,97 +783,45 @@ export default function App() {
               <label className="wide"><span>補充位置</span><input value={location} onChange={(event) => setLocation(event.target.value)} placeholder="例如車位 472 號、走廊東側" /></label>
             </div>
 
-            <fieldset>
-              <legend className="option-legend">
-                <span>材料</span>
-                <button type="button" aria-label="新增材料選項" onClick={() => startCustomOption("material")}>＋ 新增</button>
-              </legend>
-              <div className="choices single-choice">
-                {references.materials.map((item) => {
-                  const isCustom = references.custom_materials.includes(item);
-                  return (
-                    <span key={item} className={`choice-option ${material === item ? "active" : ""}`}>
-                      <button type="button" className="choice-value" aria-pressed={material === item} onClick={() => setMaterial(item)}>{item}</button>
-                      {isCustom && (
-                        <button
-                          type="button"
-                          className="choice-delete"
-                          aria-label={`刪除材料選項 ${item}`}
-                          disabled={deletingOption === `material:${item}`}
-                          onClick={() => deleteCustomOption("material", item)}
-                        >×</button>
-                      )}
-                    </span>
-                  );
-                })}
-              </div>
-              {customOptionKind === "material" && (
-                <div className="custom-option-editor">
-                  <input
-                    aria-label="自訂材料名稱"
-                    autoFocus
-                    maxLength={40}
-                    value={customOptionValue}
-                    onChange={(event) => setCustomOptionValue(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void addCustomOption("material");
-                      }
-                    }}
-                    placeholder="輸入材料名稱"
-                  />
-                  <button type="button" className="confirm" disabled={savingCustomOption} onClick={() => addCustomOption("material")}>加入材料</button>
-                  <button type="button" onClick={() => setCustomOptionKind(null)}>取消</button>
-                </div>
-              )}
-            </fieldset>
+            <OptionField
+              kind="material"
+              noun="材料"
+              legend="材料"
+              single
+              items={references.materials}
+              customItems={references.custom_materials}
+              isActive={(item) => material === item}
+              onSelect={setMaterial}
+              deletingOption={deletingOption}
+              editing={customOptionKind === "material"}
+              editorValue={customOptionValue}
+              saving={savingCustomOption}
+              onStartAdd={() => startCustomOption("material")}
+              onEditorChange={setCustomOptionValue}
+              onAdd={() => addCustomOption("material")}
+              onCancel={() => setCustomOptionKind(null)}
+              onDelete={(item) => deleteCustomOption("material", item)}
+            />
 
-            <fieldset>
-              <legend className="option-legend">
-                <span>問題（可複選）</span>
-                <button type="button" aria-label="新增問題選項" onClick={() => startCustomOption("issue")}>＋ 新增</button>
-              </legend>
-              <div className="choices">
-                {references.issues.map((item) => {
-                  const isCustom = references.custom_issues.includes(item);
-                  return (
-                    <span key={item} className={`choice-option ${issues.includes(item) ? "active" : ""}`}>
-                      <button type="button" className="choice-value" aria-pressed={issues.includes(item)} onClick={() => toggleIssue(item)}>{item}</button>
-                      {isCustom && (
-                        <button
-                          type="button"
-                          className="choice-delete"
-                          aria-label={`刪除問題選項 ${item}`}
-                          disabled={deletingOption === `issue:${item}`}
-                          onClick={() => deleteCustomOption("issue", item)}
-                        >×</button>
-                      )}
-                    </span>
-                  );
-                })}
-              </div>
-              {customOptionKind === "issue" && (
-                <div className="custom-option-editor">
-                  <input
-                    aria-label="自訂問題名稱"
-                    autoFocus
-                    maxLength={40}
-                    value={customOptionValue}
-                    onChange={(event) => setCustomOptionValue(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void addCustomOption("issue");
-                      }
-                    }}
-                    placeholder="輸入問題名稱"
-                  />
-                  <button type="button" className="confirm" disabled={savingCustomOption} onClick={() => addCustomOption("issue")}>加入問題</button>
-                  <button type="button" onClick={() => setCustomOptionKind(null)}>取消</button>
-                </div>
-              )}
-            </fieldset>
+            <OptionField
+              kind="issue"
+              noun="問題"
+              legend="問題（可複選）"
+              items={references.issues}
+              customItems={references.custom_issues}
+              isActive={(item) => issues.includes(item)}
+              onSelect={toggleIssue}
+              deletingOption={deletingOption}
+              editing={customOptionKind === "issue"}
+              editorValue={customOptionValue}
+              saving={savingCustomOption}
+              onStartAdd={() => startCustomOption("issue")}
+              onEditorChange={setCustomOptionValue}
+              onAdd={() => addCustomOption("issue")}
+              onCancel={() => setCustomOptionKind(null)}
+              onDelete={(item) => deleteCustomOption("issue", item)}
+            />
+
 
             <label className="notes-field"><span>備註</span><textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="可記錄漏水原因、缺照原因或其他說明" /></label>
 
@@ -1135,55 +832,28 @@ export default function App() {
           </section>
         </form>
 
-        <section className="case-list-section">
-          <div className="list-header">
-            <div><span className="eyebrow">ARCHIVE</span><h2>案件清單</h2><p>依棟別、定址碼、材料或問題快速尋找</p></div>
-            <div className="list-filters">
-              <button type="button" className="rescan-cases" onClick={rescanCases} disabled={scanningCases}>
-                {scanningCases ? "掃描中…" : "掃描目前資料夾"}
-              </button>
-              <input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setCasePage(1); }} placeholder="搜尋定址碼或問題…" aria-label="搜尋案件" />
-              <select value={caseBuilding} onChange={(event) => { setCaseBuilding(event.target.value); setCasePage(1); }} aria-label="依棟別篩選"><option value="">全部棟別</option>{references.buildings.map((item) => <option key={item}>{item}</option>)}</select>
-              <select value={caseMaterial} onChange={(event) => { setCaseMaterial(event.target.value); setCasePage(1); }} aria-label="依材料篩選"><option value="">全部材料</option>{references.materials.map((item) => <option key={item}>{item}</option>)}</select>
-            </div>
-          </div>
-          <div className="case-table-wrap">
-            <table className="case-table">
-              <thead><tr><th>日期</th><th>位置</th><th>定址碼</th><th>材料／問題</th><th>照片</th><th>狀態</th><th><span className="sr-only">操作</span></th></tr></thead>
-              <tbody>
-                {!cases.length ? (
-                  <tr><td colSpan={7} className="empty-row">尚無案件。儲存第一筆後會顯示在這裡。</td></tr>
-                ) : cases.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.work_date}</td><td><strong>{item.building}</strong> {item.floor}</td><td><code>{item.address_code}</code></td>
-                    <td><strong>{item.material}</strong><span className="issue-summary">{item.issues.join("／")}</span></td><td>{item.photo_count} 張</td>
-                    <td><span className={`status ${item.is_complete ? "complete" : "incomplete"}`}>{item.is_complete ? "完整" : `缺 ${item.missing_roles.join("、")}`}</span></td>
-                    <td className="row-actions"><button type="button" onClick={() => viewCase(item.id)}>檢視</button><button type="button" onClick={() => openFolder(item.id)}>開啟資料夾</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <nav className="case-pagination" aria-label="案件清單分頁">
-            <span>共 {caseTotal} 筆，第 {casePage}／{casePages} 頁</span>
-            <div>
-              <button type="button" disabled={casePage <= 1} onClick={() => setCasePage((page) => page - 1)}>上一頁</button>
-              <button type="button" disabled={casePage >= casePages} onClick={() => setCasePage((page) => page + 1)}>下一頁</button>
-            </div>
-          </nav>
-        </section>
+        <CaseListSection
+          cases={cases}
+          buildings={references.buildings}
+          materials={references.materials}
+          query={query}
+          caseBuilding={caseBuilding}
+          caseMaterial={caseMaterial}
+          casePage={casePage}
+          casePages={casePages}
+          caseTotal={caseTotal}
+          scanning={scanningCases}
+          onQueryChange={(value) => { setQuery(value); setCasePage(1); }}
+          onBuildingChange={(value) => { setCaseBuilding(value); setCasePage(1); }}
+          onMaterialChange={(value) => { setCaseMaterial(value); setCasePage(1); }}
+          onPageChange={setCasePage}
+          onRescan={rescanCases}
+          onView={viewCase}
+          onOpenFolder={openFolder}
+        />
       </main>
 
-      {selectedCase && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedCase(null); }}>
-          <section className="case-modal" role="dialog" aria-modal="true" aria-labelledby="case-title">
-            <header><div><span className="eyebrow">案件照片</span><h2 id="case-title">{selectedCase.building} {selectedCase.floor} · {selectedCase.address_code}</h2><p>{selectedCase.work_date}　{selectedCase.material}　{selectedCase.issues.join("／")}</p></div><button type="button" aria-label="關閉案件" onClick={() => setSelectedCase(null)}>×</button></header>
-            <div className="saved-photo-grid">
-              {selectedCase.photos?.map((photo) => <figure key={photo.id}><img src={photo.content_url} alt={`${photo.role} ${photo.original_name}`} /><figcaption><strong>{photo.role}</strong><span>{photo.stored_name}</span></figcaption></figure>)}
-            </div>
-          </section>
-        </div>
-      )}
+      {selectedCase && <CaseModal selectedCase={selectedCase} onClose={() => setSelectedCase(null)} />}
     </div>
   );
 }
