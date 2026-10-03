@@ -12,7 +12,7 @@ MatLens 是供 Windows 10／11 使用的消防材料更換照片整理與案件�
 
 - 原始碼倉庫：公開 `https://github.com/kobojp/MatLens`。
 - Windows 安裝包與線上更新檔：同一倉庫的 GitHub Releases。
-- 目前正式版本：`v0.4.0`；版本唯一來源為 `desktop/version.py`。
+- 目前正式版本：`v0.5.1`；版本唯一來源為 `desktop/version.py`。
 - `kobojp/MatLens-Releases` 僅保留 v0.3.0 的過渡更新入口，不再放置新版本安裝包。
 - 不得刪除或破壞舊倉庫的 `stable.json` 過渡入口，否則已安裝 v0.3.0 無法自動移轉。
 - 公開 repository 不代表可提交現場照片、案件資料、機器路徑、憑證或簽章私鑰。
@@ -125,7 +125,8 @@ PowerShell -ExecutionPolicy Bypass -File .\packaging\build.ps1
 
 1. 先理解需求與目前行為，檢查相關程式和既有資料結構。
 2. 修正錯誤時，先建立能重現問題的測試。
-3. 只實作需求所需的最小完整功能，不重構無關程式。
+3. 實作需求所需的完整功能。允許為可維護性重構（拆分過大檔案、消除重複），
+   但必須維持既有行為與資料格式，重構前後測試皆須通過，且不得與功能變更混在同一次提交。
 4. Backend API、Frontend UI 與持久化資料格式要一起考量。
 5. 修改後執行與風險相稱的測試；交付前執行完整驗證。
 6. 前端變更必須重新產生 `frontend/dist/`，因正式服務直接提供此目錄。
