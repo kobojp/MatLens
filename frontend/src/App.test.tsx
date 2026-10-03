@@ -209,6 +209,23 @@ describe("照片拖放", () => {
     expect(second).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("選火警後可再單選一個細項，改選其他問題則細項消失", async () => {
+    render(<App />);
+    expect(screen.queryByRole("button", { name: "火警細項 無回應" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "火警" }));
+    fireEvent.click(screen.getByRole("button", { name: "火警細項 無回應" }));
+    fireEvent.change(screen.getByPlaceholderText("例如 3F、B2"), { target: { value: "1F" } });
+    fireEvent.change(screen.getByPlaceholderText("例如 M3-07"), { target: { value: "M3-07" } });
+    expect((await screen.findAllByText(/二門診1F M3-07 火警-無回應/)).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "火警細項 無回應" }));
+    expect((await screen.findAllByText(/二門診1F M3-07 火警$/)).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "漏水" }));
+    expect(screen.queryByRole("button", { name: "火警細項 無回應" })).not.toBeInTheDocument();
+  });
+
   it("可新增並立即選用自訂材料", async () => {
     render(<App />);
 

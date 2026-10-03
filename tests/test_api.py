@@ -579,7 +579,7 @@ def test_create_case_rejects_multiple_issues(client: TestClient, tmp_path: Path)
     )
 
     assert response.status_code == 422
-    assert response.json()["detail"] == "問題只能選擇一項"
+    assert response.json()["detail"] == "問題只能選擇一項，火警可再選一個細項"
 
 
 def test_rescan_parses_joined_building_floor_names(
@@ -599,3 +599,36 @@ def test_rescan_parses_joined_building_floor_names(
     assert (items["M3-07"]["building"], items["M3-07"]["floor"]) == ("二門診", "1F")
     assert items["M3-07"]["issues"] == ["錯誤設備"]
     assert (items["D2-01"]["building"], items["D2-01"]["floor"]) == ("新大樓", "B2")
+
+
+def test_fire_issue_accepts_one_detail_and_names_folder(
+    client: TestClient, tmp_path: Path
+) -> None:
+    (tmp_path / "photos" / "8月" / "底座").mkdir(parents=True)
+    response = client.post(
+        "/api/cases",
+        data={
+            "work_date": "2026-08-17",
+            "building": "二門診",
+            "floor": "3F",
+            "address_code": "M3-07",
+            "material": "底座",
+            "issues": '["火警", "無回應"]',
+            "photo_roles": '["前"]',
+            "storage_month": "8月",
+            "storage_subfolder": "底座",
+        },
+        files=[("photos", ("p.jpg", jpeg_bytes((9, 8, 7)), "image/jpeg"))],
+    )
+
+    assert response.status_code == 201
+    created = response.json()
+    assert created["issues"] == ["火警", "無回應"]
+    assert Path(created["folder_path"]).name == "2026-08-17 二門診3F M3-07 火警-無回應"
+
+
+def test_staging_folder_is_removed_after_save(client: TestClient, tmp_path: Path) -> None:
+    (tmp_path / "photos" / "8月" / "底座").mkdir(parents=True)
+    assert create_case(client, [(5, 6, 7)]).status_code == 201
+
+    assert not (tmp_path / "photos" / ".staging").exists()

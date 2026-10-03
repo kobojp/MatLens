@@ -593,9 +593,9 @@ export default function App() {
       }
       if (kind === "issue") {
         setIssues((current) => (
-          current.includes(value)
+          current[0] === value
             ? [references.issues.find((item) => item !== value) ?? ""]
-            : current
+            : current.filter((item) => item !== value)
         ));
       }
       setNotice(`自訂${label}「${value}」已刪除。`);
@@ -804,7 +804,7 @@ export default function App() {
               single
               items={references.issues}
               customItems={references.custom_issues}
-              isActive={(item) => issues.includes(item)}
+              isActive={(item) => issues[0] === item}
               onSelect={(item) => setIssues([item])}
               deletingOption={deletingOption}
               editing={customOptionKind === "issue"}
@@ -817,6 +817,28 @@ export default function App() {
               onDelete={(item) => deleteCustomOption("issue", item)}
             />
 
+
+            {issues[0] === "火警" && (
+              <fieldset>
+                <legend className="option-legend"><span>火警細項（單選，可不選）</span></legend>
+                <div className="choices single-choice">
+                  {references.issues.filter((item) => item !== "火警").map((item) => {
+                    const active = issues[1] === item;
+                    return (
+                      <span key={item} className={`choice-option ${active ? "active" : ""}`}>
+                        <button
+                          type="button"
+                          className="choice-value"
+                          aria-pressed={active}
+                          aria-label={`火警細項 ${item}`}
+                          onClick={() => setIssues(active ? ["火警"] : ["火警", item])}
+                        >{item}</button>
+                      </span>
+                    );
+                  })}
+                </div>
+              </fieldset>
+            )}
 
             <label className="notes-field"><span>備註</span><textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="可記錄漏水原因、缺照原因或其他說明" /></label>
 

@@ -74,6 +74,14 @@ def _stored_names(roles: list[str], extensions: list[str]) -> list[str]:
     return names
 
 
+def _remove_empty_staging(staging_root: Path) -> None:
+    """只在 .staging 已空時移除；仍有其他暫存內容（例如同時進行的儲存）則保留。"""
+    try:
+        staging_root.rmdir()
+    except OSError:
+        pass
+
+
 async def _save_upload(upload: UploadFile, target: Path) -> tuple[str, int, int, int, str]:
     digest = hashlib.sha256()
     total = 0
@@ -244,6 +252,8 @@ async def create_case(
         if staging_dir.exists():
             shutil.rmtree(staging_dir, ignore_errors=True)
         raise
+    finally:
+        _remove_empty_staging(staging_root)
 
 
 def _case_row_to_dict(row: object, roles: list[str] | None = None) -> dict[str, object]:
