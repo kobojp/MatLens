@@ -9,10 +9,11 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
@@ -26,9 +27,20 @@ from .config import (
     PHOTO_ROOT,
 )
 from .db import connect, get_setting, initialize, set_setting
+from .overview import (
+    THUMB_SIZE,
+    OverviewCase,
+    collect_from_database,
+    collect_from_disk,
+    filename_groups,
+    make_image_bytes,
+    render_html,
+)
 from .schemas import (
     CaseCreate,
     CustomOptionCreate,
+    OverviewAutoScan,
+    OverviewExport,
     StorageFoldersCreate,
     StorageSettingsUpdate,
 )
@@ -41,6 +53,7 @@ from .storage import (
     list_cases,
     rescan_case_locations,
     resolve_free_destination,
+    sanitize_component,
     scan_directory_subfolders,
     scan_storage_tree,
 )
@@ -274,12 +287,14 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         }
 
     @app.post("/api/cases/rescan")
-    def cases_rescan(path: str = Query(..., max_length=1000)) -> dict[str, int]:
+    def cases_rescan(
+        path: str = Query(..., max_length=1000), prune: bool = True
+    ) -> dict[str, int]:
         target = Path(path.strip()).expanduser()
         if not target.is_absolute():
             raise HTTPException(status_code=422, detail="掃描路徑必須使用完整絕對路徑")
         try:
-            return rescan_case_locations(app.state.database_path, target)
+            return rescan_case_locations(app.state.database_path, target, prune=prune)
         except StorageError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -388,6 +403,124 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         if case_root not in target.parents or not target.is_file():
             raise HTTPException(status_code=404, detail="照片檔案不存在")
         return FileResponse(target)
+
+    # ---- 照片總覽 ----
+    app.state.overview_roots = {}
+
+    @app.get("/api/settings/overview-auto-scan")
+    def get_overview_auto_scan() -> dict[str, bool]:
+        return {"enabled": get_setting(app.state.database_path, "overview_auto_scan", "1") == "1"}
+
+    @app.post("/api/settings/overview-auto-scan")
+    def set_overview_auto_scan(settings: OverviewAutoScan) -> dict[str, bool]:
+        set_setting(app.state.database_path, "overview_auto_scan", "1" if settings.enabled else "0")
+        return {"enabled": settings.enabled}
+
+    def overview_cases(
+        source: str, material: str, building: str, path: str
+    ) -> list[OverviewCase]:
+        try:
+            if source == "disk":
+                target = Path(path.strip()).expanduser()
+                if not target.is_absolute():
+                    raise HTTPException(status_code=422, detail="掃描路徑必須使用完整絕對路徑")
+                return collect_from_disk(
+                    target, material=material.strip(), building=building.strip()
+                )
+            return collect_from_database(
+                app.state.database_path, material=material.strip(), building=building.strip()
+            )
+        except StorageError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @app.get("/api/overview")
+    def overview(
+        source: Literal["db", "disk"] = "db",
+        material: str = Query(default="", max_length=40),
+        building: str = Query(default="", max_length=40),
+        path: str = Query(default="", max_length=1000),
+    ) -> dict[str, object]:
+        cases = overview_cases(source, material, building, path)
+        root_id = ""
+        if source == "disk":
+            root_id = uuid.uuid4().hex
+            app.state.overview_roots[root_id] = Path(path.strip()).expanduser().resolve()
+
+        def photo_urls(case: OverviewCase, photo: object) -> dict[str, str]:
+            if photo.photo_id:  # type: ignore[attr-defined]
+                base = f"/api/photos/{photo.photo_id}"  # type: ignore[attr-defined]
+                return {"url": f"{base}/content", "thumb_url": f"{base}/thumbnail"}
+            relative = photo.path.relative_to(  # type: ignore[attr-defined]
+                app.state.overview_roots[root_id]
+            ).as_posix()
+            base = f"/api/overview/roots/{root_id}/file?rel={quote(relative)}"
+            return {"url": base, "thumb_url": f"{base}&thumb=1"}
+
+        return {
+            "source": source,
+            "material": material,
+            "building": building,
+            "total": len(cases),
+            "filenames": filename_groups(cases),
+            "cases": [
+                {
+                    "id": case.case_id,
+                    "title": case.title,
+                    "work_date": case.work_date,
+                    "material": case.material,
+                    "building": case.building,
+                    "photos": [
+                        {"name": photo.name, "role": photo.role, **photo_urls(case, photo)}
+                        for photo in case.photos
+                    ],
+                }
+                for case in cases
+            ],
+        }
+
+    def jpeg_response(path: Path) -> Response:
+        try:
+            data = make_image_bytes(path, THUMB_SIZE)
+        except StorageError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return Response(
+            data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"}
+        )
+
+    @app.get("/api/overview/roots/{root_id}/file")
+    def overview_file(root_id: str, rel: str = Query(...), thumb: bool = False) -> Response:
+        root = app.state.overview_roots.get(root_id)
+        if root is None:
+            raise HTTPException(status_code=404, detail="總覽已過期，請重新整理")
+        target = (root / rel).resolve()
+        if (
+            root not in target.parents
+            or target.suffix.casefold() not in {".jpg", ".jpeg", ".png", ".webp"}
+            or not target.is_file()
+        ):
+            raise HTTPException(status_code=404, detail="照片檔案不存在")
+        return jpeg_response(target) if thumb else FileResponse(target)
+
+    @app.get("/api/photos/{photo_id}/thumbnail")
+    def photo_thumbnail(photo_id: str) -> Response:
+        return jpeg_response(photo_content(photo_id).path)
+
+    @app.post("/api/overview/export")
+    def overview_export(request: OverviewExport) -> dict[str, object]:
+        cases = overview_cases(request.source, request.material, request.building, request.path)
+        content = render_html(
+            cases, material=request.material, building=request.building, mode=request.mode
+        )
+        export_dir = app.state.database_path.parent / "exports"
+        export_dir.mkdir(parents=True, exist_ok=True)
+        label = "-".join(part for part in (request.building, request.material) if part) or "全部"
+        suffix = "獨立版" if request.mode == "standalone" else "輕量版"
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        target = export_dir / f"MatLens照片總覽-{sanitize_component(label)}-{suffix}-{stamp}.html"
+        target.write_text(content, encoding="utf-8")
+        if request.reveal and os.name == "nt":
+            subprocess.Popen(["explorer.exe", f"/select,{target}"])  # noqa: S603, S607
+        return {"path": str(target), "size_bytes": target.stat().st_size, "total": len(cases)}
 
     @app.post("/api/cases/{case_id}/open-folder", status_code=204)
     def open_case_folder(case_id: str) -> None:

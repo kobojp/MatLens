@@ -159,8 +159,13 @@ def _photos_from_folder(folder: Path) -> list[dict[str, object]]:
     return photos
 
 
-def rescan_case_locations(database_path: Path, scan_root: Path) -> dict[str, int]:
-    """Relink missing registered case folders found uniquely under the selected root."""
+def rescan_case_locations(
+    database_path: Path, scan_root: Path, *, prune: bool = True
+) -> dict[str, int]:
+    """Relink missing registered case folders found uniquely under the selected root.
+
+    prune=False 時絕不刪除資料庫紀錄（自動掃描使用）；找不到資料夾的案件原樣保留。
+    """
     root = scan_root.resolve()
     if not root.is_dir():
         raise StorageError("掃描路徑不存在或不是資料夾")
@@ -219,7 +224,7 @@ def rescan_case_locations(database_path: Path, scan_root: Path) -> dict[str, int
                     if old_folder.is_dir():
                         unresolved += 1
                         blocked_import_names.add(case_name)
-                    else:
+                    elif prune:
                         connection.execute("DELETE FROM cases WHERE id = ?", (case["id"],))
                         removed += 1
                 continue

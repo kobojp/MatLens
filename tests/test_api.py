@@ -632,3 +632,126 @@ def test_staging_folder_is_removed_after_save(client: TestClient, tmp_path: Path
     assert create_case(client, [(5, 6, 7)]).status_code == 201
 
     assert not (tmp_path / "photos" / ".staging").exists()
+
+
+def _make_two_cases(client: TestClient, tmp_path: Path) -> None:
+    (tmp_path / "photos" / "8月" / "底座").mkdir(parents=True)
+    (tmp_path / "photos" / "8月" / "探頭").mkdir(parents=True)
+    assert create_case(client, [(1, 2, 3), (4, 5, 6)]).status_code == 201
+    other = client.post(
+        "/api/cases",
+        data={
+            "work_date": "2026-08-18",
+            "building": "三門診",
+            "floor": "2F",
+            "address_code": "A1-01",
+            "material": "探頭",
+            "issues": '["無回應"]',
+            "photo_roles": '["前"]',
+            "storage_month": "8月",
+            "storage_subfolder": "探頭",
+        },
+        files=[("photos", ("p.jpg", jpeg_bytes((7, 8, 9)), "image/jpeg"))],
+    )
+    assert other.status_code == 201
+
+
+def test_overview_from_database_filters_and_lists_filenames(
+    client: TestClient, tmp_path: Path
+) -> None:
+    _make_two_cases(client, tmp_path)
+
+    everything = client.get("/api/overview").json()
+    assert everything["total"] == 2
+
+    bases = client.get("/api/overview", params={"material": "底座"}).json()
+    assert bases["total"] == 1
+    case = bases["cases"][0]
+    assert case["title"] == "二門診3F M3-07 錯誤設備"
+    assert [photo["name"] for photo in case["photos"]] == ["01_前.jpg", "02_中.jpg"]
+    assert bases["filenames"] == "二門診3F M3-07 錯誤設備\n01_前.jpg\n02_中.jpg"
+    assert client.get(case["photos"][0]["thumb_url"]).headers["content-type"] == "image/jpeg"
+    assert client.get(case["photos"][0]["url"]).status_code == 200
+
+    by_building = client.get("/api/overview", params={"building": "三門診"}).json()
+    assert [item["title"] for item in by_building["cases"]] == ["三門診2F A1-01 無回應"]
+    assert client.get("/api/overview", params={"material": "模組"}).json()["total"] == 0
+
+
+def test_overview_from_disk_lists_unregistered_folders_and_blocks_traversal(
+    client: TestClient, tmp_path: Path
+) -> None:
+    root = tmp_path / "手動資料夾"
+    folder = root / "底座" / "2026-09-22 二門診1F M3-07 火警-無回應"
+    folder.mkdir(parents=True)
+    (folder / "02_中.jpg").write_bytes(jpeg_bytes((1, 1, 1)))
+    (folder / "01_前.jpg").write_bytes(jpeg_bytes((2, 2, 2)))
+    (folder / "notes.txt").write_text("x")
+    secret = tmp_path / "secret.jpg"
+    secret.write_bytes(jpeg_bytes((9, 9, 9)))
+
+    data = client.get(
+        "/api/overview", params={"source": "disk", "path": str(root), "material": "底座"}
+    ).json()
+
+    assert data["total"] == 1
+    case = data["cases"][0]
+    assert case["title"] == "二門診1F M3-07 火警-無回應"
+    assert [photo["name"] for photo in case["photos"]] == ["01_前.jpg", "02_中.jpg"]
+    assert client.get(case["photos"][0]["thumb_url"]).status_code == 200
+    assert client.get(case["photos"][0]["url"]).status_code == 200
+    root_id = case["photos"][0]["url"].split("/roots/")[1].split("/")[0]
+    escaped = client.get(f"/api/overview/roots/{root_id}/file", params={"rel": "../secret.jpg"})
+    assert escaped.status_code == 404
+    unknown = client.get("/api/overview/roots/unknown/file", params={"rel": "a.jpg"})
+    assert unknown.status_code == 404
+    relative = client.get("/api/overview", params={"source": "disk", "path": "relative"})
+    assert relative.status_code == 422
+    assert client.get(
+        "/api/overview", params={"source": "disk", "path": str(root), "building": "三門診"}
+    ).json()["total"] == 0
+
+
+def test_overview_export_light_and_standalone(client: TestClient, tmp_path: Path) -> None:
+    _make_two_cases(client, tmp_path)
+
+    light = client.post(
+        "/api/overview/export", json={"material": "底座", "mode": "light", "reveal": False}
+    ).json()
+    standalone = client.post(
+        "/api/overview/export", json={"material": "底座", "mode": "standalone", "reveal": False}
+    ).json()
+
+    light_html = Path(light["path"]).read_text(encoding="utf-8")
+    standalone_html = Path(standalone["path"]).read_text(encoding="utf-8")
+    assert "底座共 1 筆" in light_html and "二門診3F M3-07 錯誤設備" in light_html
+    assert "01_前.jpg" in light_html and "data:image/jpeg;base64," in light_html
+    assert 'data-full="file:///' in light_html
+    assert 'data-full="data:image/jpeg' in standalone_html
+    assert light["total"] == 1 and "輕量版" in Path(light["path"]).name
+    assert "獨立版" in Path(standalone["path"]).name
+    assert "三門診" not in light_html
+
+
+def test_overview_auto_scan_setting_defaults_on_and_persists(client: TestClient) -> None:
+    assert client.get("/api/settings/overview-auto-scan").json() == {"enabled": True}
+    client.post("/api/settings/overview-auto-scan", json={"enabled": False})
+    assert client.get("/api/settings/overview-auto-scan").json() == {"enabled": False}
+
+
+def test_rescan_without_prune_keeps_records_of_missing_folders(
+    client: TestClient, tmp_path: Path
+) -> None:
+    (tmp_path / "photos" / "8月" / "底座").mkdir(parents=True)
+    created = create_case(client, [(3, 3, 3)]).json()
+    shutil.rmtree(tmp_path / "photos" / created["folder_path"])
+    elsewhere = tmp_path / "別處"
+    elsewhere.mkdir()
+
+    kept = client.post("/api/cases/rescan", params={"path": str(elsewhere), "prune": "false"})
+    assert kept.json()["removed"] == 0
+    assert client.get("/api/cases").json()["total"] == 1
+
+    pruned = client.post("/api/cases/rescan", params={"path": str(elsewhere)})
+    assert pruned.json()["removed"] == 1
+    assert client.get("/api/cases").json()["total"] == 0

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -61,3 +62,16 @@ class CustomOptionCreate(BaseModel):
         if not normalized:
             raise ValueError("選項不可空白")
         return normalized
+
+
+class OverviewAutoScan(BaseModel):
+    enabled: bool
+
+
+class OverviewExport(BaseModel):
+    source: Literal["db", "disk"] = "db"
+    material: str = ""
+    building: str = ""
+    path: str = ""
+    mode: Literal["light", "standalone"] = "light"
+    reveal: bool = True
