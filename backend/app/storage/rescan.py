@@ -103,7 +103,7 @@ def _automatic_roles(count: int) -> list[str]:
     if count:
         roles[0] = "前"
     if count >= 2:
-        roles[-1] = "完成"
+        roles[-1] = "後"
     if count >= 4:
         roles[-2] = "後"
     return roles

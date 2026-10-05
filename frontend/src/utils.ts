@@ -15,15 +15,16 @@ export function localDate(): string {
   return new Date(now.getTime() - offset).toISOString().slice(0, 10);
 }
 
+// 預設角色不使用「完成」；需要時由「這張照片是」選單手動改
 export function initialRoles(count: number): string[] {
   if (count === 1) return ["前"];
-  if (count === 2) return ["前", "完成"];
-  if (count === 3) return ["前", "中", "完成"];
-  if (count === 4) return ["前", "中", "後", "完成"];
-  if (count === 5) return ["前", "中", "後", "完成", "樓層"];
+  if (count === 2) return ["前", "後"];
+  if (count === 3) return ["前", "中", "後"];
+  if (count === 4) return ["前", "中", "後", "後"];
+  if (count === 5) return ["前", "中", "後", "後", "樓層"];
   return Array.from({ length: count }, (_, index) => {
     if (index === 0) return "前";
-    if (index === count - 1) return "完成";
+    if (index === count - 1) return "後";
     if (index === count - 2) return "後";
     return "中";
   });

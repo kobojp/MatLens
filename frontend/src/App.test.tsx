@@ -65,7 +65,7 @@ describe("照片拖放", () => {
     expect(window.matlensDesktopState?.dirty).toBe(true);
   });
 
-  it("四張照片依前中後完成自動排列", async () => {
+  it("四張照片依前中後後自動排列", async () => {
     const { container } = render(<App />);
     const files = ["a", "b", "c", "d"].map(
       (name) => new File([name], `${name}.jpg`, { type: "image/jpeg" }),
@@ -78,7 +78,7 @@ describe("照片拖放", () => {
     await screen.findByText("d.jpg");
     expect(
       [...container.querySelectorAll(".thumbnail-copy strong")].map((node) => node.textContent),
-    ).toEqual(["前", "中", "後", "完成"]);
+    ).toEqual(["前", "中", "後", "後"]);
     expect(screen.getByRole("combobox", { name: "這張照片是" }).querySelectorAll("option")[2])
       .toHaveTextContent("後");
   });
@@ -239,7 +239,7 @@ describe("照片拖放", () => {
     });
     await screen.findByText("a.jpg");
     fireEvent.change(screen.getByLabelText("這張照片是"), { target: { value: "前" } });
-    fireEvent.click(screen.getByRole("button", { name: /完成：b\.jpg/ }));
+    fireEvent.click(screen.getByRole("button", { name: /後：b\.jpg/ }));
     fireEvent.change(screen.getByLabelText("這張照片是"), { target: { value: "前" } });
     expect(screen.getByText("前-2.jpg")).toBeInTheDocument();
 
