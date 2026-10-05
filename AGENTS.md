@@ -12,9 +12,10 @@ MatLens 是供 Windows 10／11 使用的消防材料更換照片整理與案件�
 
 - 原始碼倉庫：公開 `https://github.com/kobojp/MatLens`。
 - Windows 安裝包與線上更新檔：同一倉庫的 GitHub Releases。
-- 目前正式版本：`v0.5.1`；版本唯一來源為 `desktop/version.py`。
-- `kobojp/MatLens-Releases` 僅保留 v0.3.0 的過渡更新入口，不再放置新版本安裝包。
-- 不得刪除或破壞舊倉庫的 `stable.json` 過渡入口，否則已安裝 v0.3.0 無法自動移轉。
+- 目前正式版本：`v0.5.3`；版本唯一來源為 `desktop/version.py`。
+- 舊倉庫 `kobojp/MatLens-Releases` 已於 2026-10-05 刪除，不再有過渡入口。
+  仍停在 v0.3.0 的安裝無法自動更新，需手動安裝新版完整 ZIP 一次。
+- 所有更新檔只放在 `kobojp/MatLens` 的 GitHub Releases。
 - 公開 repository 不代表可提交現場照片、案件資料、機器路徑、憑證或簽章私鑰。
 
 ## 技術棧
@@ -32,7 +33,8 @@ MatLens 是供 Windows 10／11 使用的消防材料更換照片整理與案件�
 
 ```text
 MatLens/
-├─ backend/app/       FastAPI、SQLite、照片儲存邏輯
+├─ backend/app/       FastAPI、SQLite、照片總覽（overview.py）
+│  └─ storage/        路徑、案件、命名、掃描與照片同步（paths／cases／naming／rescan／photo_sync）
 ├─ frontend/src/      React 使用者介面
 ├─ frontend/dist/     正式前端建置結果，由 FastAPI 提供
 ├─ tests/             後端 API 與儲存測試
@@ -58,6 +60,12 @@ MatLens/
 - 既有案件必須繼續使用建立案件時記錄的 `storage_root`；變更預設目錄不可破壞舊案件。
 - SQLite schema 變更必須採向後相容、可重複執行的增量方式。
 - 刪除自訂快速選項不得刪除或改寫既有案件資料。
+- 掃描只讀取照片；它可以更新資料庫中的檔名、路徑、角色與案件欄位，
+  但不得修改、重新命名、搬移或刪除任何磁碟上的檔案。
+- 只有使用者手動按「掃描目前資料夾」（`prune=true`）才可移除找不到檔案的案件或照片紀錄；
+  照片總覽的自動掃描必須使用 `prune=false`，絕不刪除紀錄。
+- 辨識被改名的照片與案件資料夾必須以檔案內容（SHA-256）為準；
+  有多個候選或資料庫唯一性衝突時略過並回報，不得猜測。
 - 內建材料與問題選項受到保護，不可由一般刪除功能移除。
 - 任何具破壞性的資料操作都必須先確認精確目標與使用者授權。
 - 桌面資料庫位於 `%LOCALAPPDATA%/MatLens/`，必須與安裝檔案分離。
@@ -167,7 +175,9 @@ PowerShell -ExecutionPolicy Bypass -File .\packaging\build.ps1
 - 介面文字使用台灣繁體中文，操作應適合現場快速整理照片。
 - 保持鍵盤、滑鼠與拖放操作可用，互動元件提供可辨識的 accessible name。
 - 照片預覽建立的 object URL 必須在移除照片或卸載時釋放。
-- 自訂材料／問題可以新增和刪除；問題維持可複選。
+- 自訂材料／問題可以新增和刪除；問題為單選，僅「火警」可再選一個細項（例：火警-無回應）。
+- 本次照片的角色預設順序由使用者在畫面上拖曳設定並存入資料庫，不得寫死。
+- 縮圖可拖曳排序；排序只改順序，角色留在原照片上。拖曳縮圖不得被當成新增檔案。
 - 自訂選項刪除前必須確認，並提示既有案件不受影響。
 - 不得只更新畫面狀態而未同步後端；SQLite 是自訂選項與案件的資料來源。
 - UI 行為修正需使用 Testing Library 加入使用者操作層級的回歸測試。

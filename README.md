@@ -1,144 +1,183 @@
 # MatLens
 
-消防材料更換照片整理與案件管理系統。第一版以 Windows 10/11 本機離線使用為目標，照片與案件資料不會上傳到雲端。
+消防材料更換照片整理與案件管理系統，供 Windows 10／11 本機離線使用。
+現場照片匯入後，記錄棟別、樓層、定址碼、材料與問題，再依一致的資料夾與檔名規則存到本機。
+照片與案件資料都不會上傳到雲端。
 
-## 第一版功能
+## 下載與安裝
 
-- 一次匯入或拖放多張 JPG、PNG、WebP 照片。
-- 大圖預覽，以及「前／中／完成／樓層／位置／設備標籤」快速分類。
-- 預覽預設完整顯示；滾輪或 ＋／− 縮放、左鍵拖曳平移、雙擊或「顯示完整圖片」還原。
-  縮放範圍 25%～800%（相對完整顯示比例）；切換照片自動還原。
-- 記錄維修日期、棟別、樓層、定址碼、材料、問題、位置及備註。
-- 材料與問題提供快速選項；問題單選，兩者都能新增及刪除自訂選項（內建選項受保護）。
-- 掃描使用者指定目錄內的月份資料夾（例如 `8月`、`9月`）及其子目錄。
-- 依維修日期預選當月，再由使用者選擇 `底座`、`模組`、`探頭` 等實際儲存位置。
-- 當月份不存在時會提示，可一次建立月份與多個常用／自訂子目錄；系統只在選定位置建立案件資料夾。
-- 產生 `前.jpg`、`中.jpg`、`完成.jpg` 等一致檔名；同類型多張為 `前-1.jpg`、`前-2.jpg`。
-  可勾選「檔名加上序號」改為 `01_前.jpg`、`02_中.jpg`。
-- 掃描會依照片內容辨識被改名的照片與案件資料夾，並更新資料庫的檔名、角色與案件欄位。
-- SQLite 案件清單、搜尋、篩選及照片回看。
-- 缺少前／中／完成照片提醒。
-- SHA-256 完全相同照片檢查，避免照片重複放入不同案件。
-- 可透過 Windows 資料夾選擇器指定照片儲存目錄；既有案件仍保留原路徑。
-- 照片加入後仍可繼續拖放更多照片。
-- 所有匯入均採複製方式，不修改來源照片。
+到 [Releases](https://github.com/kobojp/MatLens/releases) 下載最新的 `MatLens-<版本>-win-x64.zip`，解壓縮後：
 
-## Windows 執行
+- 雙擊 `Install-MatLens.cmd`：安裝到使用者程式目錄，並建立桌面與開始選單捷徑（建議）。
+- 或直接執行 `MatLens/MatLens.exe`：免安裝，必須保留整個資料夾。
 
-### 桌面版（Windows 10／11 x64）
+不需要安裝 Python、uv 或 Node.js，但需要 Microsoft Edge WebView2 Runtime。
+多數 Windows 10／11 已內建；缺少時請從
+[Microsoft 官方網站](https://developer.microsoft.com/microsoft-edge/webview2/) 安裝 Evergreen Runtime。
 
-解壓縮 `MatLens-0.4.0-win-x64.zip` 後：
+資料庫在 `%LOCALAPPDATA%\MatLens\matlens.db`，紀錄在同目錄的 `logs\`，與程式檔案分離。
+照片存放位置可自訂，更新安裝不會動到案件或照片。
 
-- 直接雙擊 `MatLens/MatLens.exe` 啟動免安裝版，必須保留整個資料夾。
-- 或雙擊 `Install-MatLens.cmd` 安裝至使用者程式目錄並建立桌面／開始選單捷徑。
-- 使用者不必安裝 Python、uv 或 Node.js；需要 Microsoft Edge WebView2 Runtime。
-- 已有 WebView2 的電腦可離線使用。缺少時可從 [Microsoft 官方網站](https://developer.microsoft.com/microsoft-edge/webview2/) 安裝 Evergreen Runtime。
+## 使用流程
 
-桌面版資料庫存於 `%LOCALAPPDATA%/MatLens/matlens.db`，紀錄位於同目錄的 `logs/`。
-照片目錄可自訂；更新安裝不會清除案件或照片。
-第一次從原始碼啟動時，會備份並複製專案 `data/matlens.db`，保留原照片路徑。
-之後桌面版與舊網頁版的案件資料各自獨立，不會雙向同步；完成轉換後請統一使用桌面版。
-在其他位置首次啟動時，可指定舊資料庫（目的地已有資料時會拒絕覆蓋）：
+1. **加入照片**：拖放或點選匯入 JPG、PNG、WebP，可連續加入更多張（單一案件最多 30 張）。
+2. **整理照片**：
+   - 縮圖可**拖曳排序**，或用縮圖右下角的 ◀ ▶ 按鈕移動；角色留在原照片上，只改順序。
+   - 每張照片用「這張照片是」選單選角色：前、中、後、完成、樓層、位置、設備標籤、其他。
+   - 大圖預覽可滾輪或 ＋／− 縮放（25%～800%）、拖曳平移、雙擊還原。
+3. **填寫案件**：維修日期、棟別、樓層、定址碼、材料、問題、補充位置與備註。
+   - 材料與問題有快速選項，可新增與刪除自訂選項（內建選項受保護）。
+   - 問題為**單選**；選「火警」時可再選一個細項，例如 `火警-無回應`。
+4. **選擇儲存位置**，按「儲存案件」。
 
-```powershell
-.\MatLens.exe --import-from "D:\舊版MatLens\data\matlens.db"
+系統會提醒缺少的照片（需要前、中，以及後或完成其中之一），並以 SHA-256 檢查完全相同的照片，
+避免同一張照片被放進不同案件。所有匯入都是**複製**，不會修改來源照片。
+
+### 儲存位置的兩種模式
+
+- **月份模式**：掃描照片儲存目錄內的月份資料夾（`8月`、`9月`…），依維修日期預選當月，
+  再選 `底座`、`模組`、`探頭` 等子目錄。月份不存在時可一次建立月份與多個子目錄。
+- **自由路徑模式**：指定任意目錄，掃描其子目錄後選擇存入位置，可選擇是否在資料夾名稱前加日期。
+
+### 資料夾與檔名規則
+
+案件資料夾，棟別與樓層連寫，其餘以空白分隔：
+
+```text
+2026-09-21 二門診1F M3-07 錯誤設備
+2026-09-22 二門診3F M3-08 火警-無回應
 ```
 
-開發啟動（仍使用 uv 虛擬環境）：
+照片檔名預設不加序號；同類型多張會編號。可勾選「檔名加上序號」，設定會被記住：
+
+| 預設 | 勾選「檔名加上序號」 |
+|---|---|
+| `前-1.jpg`、`前-2.jpg`、`中.jpg`、`後.jpg` | `01_前-1.jpg`、`02_前-2.jpg`、`03_中.jpg`、`04_後.jpg` |
+
+### 預設角色順序
+
+「本次照片」下方的「預設角色順序」可拖曳排序、拖到「不使用」區移除。
+拉進照片時依此順序從第一個角色開始分配，照片比角色多時沿用最後一個角色。預設為 `前 → 中 → 後`，
+設定存在資料庫，重開後仍有效。
+
+## 案件清單、掃描與同步
+
+案件清單支援搜尋、依棟別與材料篩選、分頁、檢視照片，以及開啟案件資料夾。
+
+「**掃描目前資料夾**」會讓資料庫與磁碟保持一致，並以**檔案內容（SHA-256）**辨識，不依賴檔名：
+
+| 你在磁碟上做的事 | 掃描結果 |
+|---|---|
+| 搬動案件資料夾 | 重新連結路徑 |
+| 改了案件資料夾名稱 | 依照片內容找到新資料夾並重新連結；備註與補充位置保留，棟別、樓層、定址碼、問題、日期、材料依新名稱更新 |
+| 改了圖檔名稱 | 更新檔名與路徑；檔名含已知角色（前、中、後…）時角色跟著更新 |
+| 新增圖檔 | 加入該案件（內容重複者略過） |
+| 用修圖軟體編修照片 | 更新雜湊與尺寸 |
+| 手動新增整個案件資料夾 | 匯入為新案件 |
+| 刪除檔案或資料夾 | 手動掃描時移除找不到檔案的紀錄 |
+
+掃描只讀取照片，不會改名、搬移或刪除磁碟上的任何檔案。有多個候選資料夾時會略過並回報，不猜測。
+
+## 照片總覽與檔名清單
+
+案件清單上方有兩個按鈕：
+
+- **照片總覽**：依材料與棟別列出案件，標題如 `二門診3F M3-07 錯誤設備`，
+  下方由左到右排列每張照片與圖檔名，上方顯示「底座共 N 筆」。縮圖大小可調，點縮圖可放大，並可上一張、下一張。
+- **檔名清單**：依案件分組列出，可一鍵複製。可切換「只列資料夾名稱」或「含圖檔名稱」。
+
+資料來源可選「案件資料庫」或「磁碟資料夾」（直接掃描，涵蓋尚未登錄的資料夾）。
+「整理前自動掃描新資料夾」預設開啟，只匯入新資料夾與重新連結，**絕不刪除任何紀錄**。
+
+**另存網頁**會輸出單一 HTML 檔到 `%LOCALAPPDATA%\MatLens\exports\`，並在檔案總管中選取：
+
+- **輕量版**：縮圖內嵌，放大時讀取本機原始照片；檔案小，只能在這台電腦看完整大圖。
+- **獨立版**：縮圖與放大圖（約 1000 像素）都內嵌，可直接傳給他人；檔案較大。
+
+## 線上更新
+
+啟動時只檢查正式版，**不會自動下載或強制安裝**。到「關於與更新」可下載並驗證，
+儲存目前案件後再選擇安裝並重新啟動。沒有網路時仍可正常整理與儲存。
+
+更新資訊以內建公鑰驗證 Ed25519 簽章，更新包再驗證 SHA-256 與 ZIP 路徑；
+安裝前會先建立 SQLite 備份並保留前一版程式。開發版與免安裝版只能檢查更新。
+詳見 [更新維護與復原](docs/online-updates.md)。
+
+## 資料安全
+
+- 匯入照片一律複製，不修改來源照片。
+- 既有案件沿用建立時記錄的儲存目錄，變更預設目錄不影響舊案件。
+- 資料庫位於 `%LOCALAPPDATA%\MatLens\`，與程式分離；更新前自動備份。
+- 桌面內部服務只綁定本機 loopback 隨機埠，並檢查 session cookie、Host 與 Origin。
+- 桌面版與舊網頁版使用各自獨立的資料庫，不會自動同步。第一次從原始碼啟動時，
+  會以 SQLite 備份複製專案 `data/matlens.db`，不覆蓋既有桌面資料庫。
+  也可指定舊資料庫：
+
+  ```powershell
+  .\MatLens.exe --import-from "D:\舊版MatLens\data\matlens.db"
+  ```
+
+## 開發
+
+環境：Python 3.12（以 [uv](https://docs.astral.sh/uv/) 管理）與 Node.js。
+
+```powershell
+uv sync --locked
+npm --prefix frontend ci
+```
+
+桌面版開發啟動：
 
 ```powershell
 PowerShell -ExecutionPolicy Bypass -File .\run-desktop.ps1
 ```
 
-產生 EXE 與 ZIP：
+網頁版（先建置前端，開啟 <http://127.0.0.1:8000>）：
 
 ```powershell
-PowerShell -ExecutionPolicy Bypass -File .\packaging\build.ps1
-```
-
-`packaging/MatLens.iss` 另提供 Inno Setup 6 安裝設定，已安裝編譯器後可加 `-Installer`。
-目前交付物是免安裝 ZIP 與捷徑安裝腳本；Inno Setup 安裝包尚未驗證。
-測試範圍與限制請見 [桌面驗證紀錄](docs/desktop-validation.md)。
-
-### 線上更新（0.3.0 起）
-
-從 [MatLens Releases](https://github.com/kobojp/MatLens/releases) 取得完整安裝 ZIP，
-執行 `Install-MatLens.cmd` 一次後，往後可使用「關於與更新」。原始碼與下載都在同一個公開倉庫。
-啟動時只檢查正式版，不自動下載或強制安裝；下載驗證完成後，先儲存案件，再選擇安裝重啟。
-開發版／可攜版只能檢查更新。沒有網路仍可整理及儲存案件。
-更新採簽章驗證、SQLite 備份與保留前一版程式，詳見 [更新維護與復原](docs/online-updates.md)。
-
-### 原有網頁版
-
-需要先安裝：
-
-- [uv](https://docs.astral.sh/uv/)
-- Node.js（目前僅在第一次建置前端時需要）
-
-在專案資料夾開啟 PowerShell：
-
-```powershell
+npm --prefix frontend run build
 PowerShell -ExecutionPolicy Bypass -File .\run.ps1
 ```
 
-看到啟動訊息後，以瀏覽器開啟：
-
-```text
-http://127.0.0.1:8000
-```
-
-按 `Ctrl+C` 可停止程式。
-
-案件資料預設儲存在：
-
-```text
-data/
-├─ matlens.db
-└─ photos/
-```
-
-原始的 `材料更換照片/` 資料夾不會被系統修改。
-
-## 開發模式
-
-後端：
+前後端分開開發：
 
 ```powershell
-uv sync
-uv run uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
+uv run --locked uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
+npm --prefix frontend run dev    # http://127.0.0.1:5173，Vite 轉送 /api
 ```
 
-前端使用另一個 PowerShell：
+完整驗證：
 
 ```powershell
-cd frontend
-npm install
-npm run dev
-```
-
-開發介面位於 `http://127.0.0.1:5173`，Vite 會將 `/api` 轉送至 FastAPI。
-
-## 驗證
-
-```powershell
-uv run ruff check .
-uv run pytest
+uv run --locked ruff check .
+uv run --locked pytest
 npm --prefix frontend test
 npm --prefix frontend run build
 ```
+
+建立 EXE 與 ZIP（桌面版）：
+
+```powershell
+PowerShell -ExecutionPolicy Bypass -File .\packaging\build.ps1
+uv run --locked python -m desktop.main --self-test --report build/source-self-test.json
+```
+
+測試範圍與限制見 [桌面驗證紀錄](docs/desktop-validation.md)；
+發佈流程見 [更新維護與復原](docs/online-updates.md)。
 
 ## 專案結構
 
 ```text
 MatLens/
-├─ backend/app/       FastAPI、SQLite 與照片儲存
+├─ backend/app/       FastAPI、SQLite、照片總覽
+│  └─ storage/        路徑、案件、命名、掃描與照片同步
 ├─ frontend/src/      React 操作介面
-├─ desktop/           Windows 桌面入口、視窗與資料接續
+├─ desktop/           Windows 桌面入口、本機服務、資料接續與線上更新
 ├─ packaging/         EXE／ZIP 建置與安裝腳本
-├─ docs/              驗證紀錄
-├─ tests/             API 與照片儲存測試
-├─ data/              執行後建立的本機資料
+├─ docs/              驗證紀錄、更新維護與各版發行說明
+├─ tests/             後端 API、更新與桌面測試
+├─ data/              網頁版執行後建立的本機資料（不提交）
 ├─ pyproject.toml     uv 專案與 Python 依賴
 ├─ uv.lock            鎖定依賴版本
-└─ run.ps1            Windows 啟動腳本
+└─ run.ps1            網頁版啟動腳本
 ```
