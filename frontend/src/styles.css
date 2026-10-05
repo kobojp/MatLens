@@ -275,3 +275,23 @@ legend { margin-bottom: 7px; color: #5e6d75; font-size: 12px; }
 .overview-lightbox > .overview-lightbox-close { position: absolute; top: 14px; right: 16px; }
 
 .name-sequence-toggle { display: flex; align-items: center; gap: 7px; margin: 8px 0 2px; font-size: 13px; color: #44525a; }
+
+.thumbnail-item[draggable="true"] { cursor: grab; }
+.thumbnail-item.dragging { opacity: .45; }
+.thumbnail-item.drop-target { border-color: #1f6f5c; background: #e8f4f0; }
+.move-photo { position: absolute; right: 6px; bottom: 5px; display: flex; gap: 3px; opacity: 0; }
+.thumbnail-item:hover .move-photo, .move-photo:focus-within { opacity: 1; }
+.move-photo button { width: 22px; height: 20px; padding: 0; border: 1px solid #cbd5da; border-radius: 4px; font-size: 10px; background: #fff; }
+.move-photo button:disabled { opacity: .35; }
+.role-order { margin-top: 12px; border-top: 1px solid #e0e6e8; padding-top: 8px; font-size: 13px; }
+.role-order summary { cursor: pointer; color: #44525a; font-weight: 600; }
+.role-order-help { margin: 6px 0; color: #6e7c83; font-size: 12px; }
+.role-order-used, .role-order-pool { display: flex; flex-wrap: wrap; gap: 6px; min-height: 38px; padding: 6px; border: 1px dashed #cbd5da; border-radius: 6px; }
+.role-order-pool { margin-top: 6px; background: #f6f8f9; }
+.role-order-pool-label { width: 100%; font-size: 11px; color: #8a979d; }
+.role-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 6px; border: 1px solid #1f6f5c; border-radius: 6px; background: #e8f4f0; cursor: grab; }
+.role-chip.pool { border-color: #cbd5da; background: #fff; }
+.role-chip.over { outline: 2px solid #d34b42; }
+.role-chip-index { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; font-size: 10px; color: #fff; background: #1f6f5c; }
+.role-chip button { padding: 0 3px; border: 0; font-size: 11px; color: #44525a; background: transparent; }
+.role-chip button:disabled { opacity: .3; }

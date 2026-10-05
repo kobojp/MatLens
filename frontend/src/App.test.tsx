@@ -239,7 +239,7 @@ describe("照片拖放", () => {
     });
     await screen.findByText("a.jpg");
     fireEvent.change(screen.getByLabelText("這張照片是"), { target: { value: "前" } });
-    fireEvent.click(screen.getByRole("button", { name: /後：b\.jpg/ }));
+    fireEvent.click(screen.getByRole("button", { name: /中：b\.jpg/ }));
     fireEvent.change(screen.getByLabelText("這張照片是"), { target: { value: "前" } });
     expect(screen.getByText("前-2.jpg")).toBeInTheDocument();
 
@@ -249,6 +249,76 @@ describe("照片拖放", () => {
       ([url, init]) => String(url).includes("settings/name-sequence") && init?.method === "POST",
     );
     expect(JSON.parse(String(saved?.[1]?.body))).toEqual({ enabled: true });
+  });
+
+  it("縮圖可拖曳或用按鈕排序，角色留在原照片上，拖曳不會被當成新增檔案", async () => {
+    const { container } = render(<App />);
+    const files = ["a", "b", "c"].map((name) => new File([name], `${name}.jpg`, { type: "image/jpeg" }));
+    fireEvent.drop(screen.getByRole("button", { name: /拉入 3～5 張照片/ }), {
+      dataTransfer: { files },
+    });
+    await screen.findByText("c.jpg");
+    const order = () =>
+      [...container.querySelectorAll(".thumbnail-copy")].map(
+        (node) => `${node.querySelector("strong")?.textContent}:${node.querySelector("small")?.textContent}`,
+      );
+    expect(order()).toEqual(["前:a.jpg", "中:b.jpg", "後:c.jpg"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "將 c.jpg 往前移" }));
+    expect(order()).toEqual(["前:a.jpg", "後:c.jpg", "中:b.jpg"]);
+
+    const items = container.querySelectorAll(".thumbnail-item");
+    fireEvent.dragStart(items[0]);
+    fireEvent.dragOver(items[2]);
+    fireEvent.drop(items[2]);
+    fireEvent.dragEnd(items[0]);
+    expect(order()).toEqual(["後:c.jpg", "中:b.jpg", "前:a.jpg"]);
+    expect(screen.queryByText("請選擇 JPG、PNG 或 WebP 圖片。")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /往前移/ })[0]).toBeDisabled();
+  });
+
+  it("預設角色順序可調整、儲存，並套用到之後拉進的照片", async () => {
+    const fetchMock = vi.mocked(fetch);
+    const { container } = render(<App />);
+    fireEvent.click(screen.getByText("預設角色順序"));
+    fireEvent.click(screen.getByRole("button", { name: "加入 完成" }));
+    fireEvent.click(screen.getByRole("button", { name: "不使用 中" }));
+
+    const saved = fetchMock.mock.calls.filter(
+      ([url, init]) => String(url).includes("settings/role-order") && init?.method === "POST",
+    );
+    expect(JSON.parse(String(saved.at(-1)?.[1]?.body))).toEqual({ roles: ["前", "後", "完成"] });
+
+    const files = ["a", "b", "c", "d"].map((name) => new File([name], `${name}.jpg`, { type: "image/jpeg" }));
+    fireEvent.drop(screen.getByRole("button", { name: /拉入 3～5 張照片/ }), {
+      dataTransfer: { files },
+    });
+    await screen.findByText("d.jpg");
+    expect([...container.querySelectorAll(".thumbnail-copy strong")].map((n) => n.textContent)).toEqual([
+      "前",
+      "後",
+      "完成",
+      "完成",
+    ]);
+  });
+
+  it("預設角色順序至少保留一個角色，並可用拖曳改順序", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByText("預設角色順序"));
+    const used = screen.getByRole("list", { name: "使用中的角色順序" });
+    const chips = () => [...used.querySelectorAll(".role-chip strong")].map((node) => node.textContent);
+    expect(chips()).toEqual(["前", "中", "後"]);
+
+    const first = used.querySelectorAll(".role-chip")[0];
+    const last = used.querySelectorAll(".role-chip")[2];
+    fireEvent.dragStart(first);
+    fireEvent.dragOver(last);
+    fireEvent.drop(last);
+    expect(chips()).toEqual(["中", "後", "前"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "不使用 中" }));
+    fireEvent.click(screen.getByRole("button", { name: "不使用 後" }));
+    expect(screen.getByRole("button", { name: "不使用 前" })).toBeDisabled();
   });
 
   it("可新增並立即選用自訂材料", async () => {

@@ -15,19 +15,20 @@ export function localDate(): string {
   return new Date(now.getTime() - offset).toISOString().slice(0, 10);
 }
 
-// 預設角色不使用「完成」；需要時由「這張照片是」選單手動改
-export function initialRoles(count: number): string[] {
-  if (count === 1) return ["前"];
-  if (count === 2) return ["前", "後"];
-  if (count === 3) return ["前", "中", "後"];
-  if (count === 4) return ["前", "中", "後", "後"];
-  if (count === 5) return ["前", "中", "後", "後", "樓層"];
-  return Array.from({ length: count }, (_, index) => {
-    if (index === 0) return "前";
-    if (index === count - 1) return "後";
-    if (index === count - 2) return "後";
-    return "中";
-  });
+export const DEFAULT_ROLE_ORDER = ["前", "中", "後"];
+
+export function moveItem<T>(items: T[], from: number, to: number): T[] {
+  if (from === to || from < 0 || to < 0 || from >= items.length || to >= items.length) return items;
+  const next = [...items];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+}
+
+// 依「預設角色順序」從第一個開始分配；照片比角色多時沿用最後一個角色
+export function initialRoles(count: number, order: string[] = DEFAULT_ROLE_ORDER): string[] {
+  const roles = order.length ? order : DEFAULT_ROLE_ORDER;
+  return Array.from({ length: count }, (_, index) => roles[Math.min(index, roles.length - 1)]);
 }
 
 export function safeName(value: string): string {

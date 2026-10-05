@@ -3,6 +3,7 @@ import CaseListSection from "./CaseListSection";
 import CaseModal from "./CaseModal";
 import OptionField from "./OptionField";
 import OverviewModal from "./OverviewModal";
+import RoleOrderEditor from "./RoleOrderEditor";
 import PhotoPreview from "./PhotoPreview";
 import StorageDestination from "./StorageDestination";
 import UpdatePanel from "./UpdatePanel";
@@ -15,7 +16,16 @@ import type {
   StorageMode,
   StorageTree,
 } from "./types";
-import { FALLBACK_REFERENCES, errorText, initialRoles, localDate, roleFileNames, safeName } from "./utils";
+import {
+  DEFAULT_ROLE_ORDER,
+  FALLBACK_REFERENCES,
+  errorText,
+  initialRoles,
+  localDate,
+  moveItem,
+  roleFileNames,
+  safeName,
+} from "./utils";
 
 export default function App() {
   const [references, setReferences] = useState(FALLBACK_REFERENCES);
@@ -38,6 +48,10 @@ export default function App() {
   const [casePages, setCasePages] = useState(1);
   const [scanningCases, setScanningCases] = useState(false);
   const [nameWithSequence, setNameWithSequence] = useState(false);
+  const [roleOrder, setRoleOrder] = useState<string[]>(DEFAULT_ROLE_ORDER);
+  const [draggedPhotoId, setDraggedPhotoId] = useState("");
+  const [dragOverPhotoId, setDragOverPhotoId] = useState("");
+  const draggedPhoto = useRef("");
   const [overviewView, setOverviewView] = useState<"gallery" | "names" | null>(null);
   const [selectedCase, setSelectedCase] = useState<CaseRecord | null>(null);
   const [saving, setSaving] = useState(false);
@@ -210,6 +224,10 @@ export default function App() {
       .then((response) => (response.ok ? response.json() : Promise.reject()))
       .then((payload: { path: string }) => setStorageRoot(payload.path))
       .catch(() => undefined);
+    fetch("/api/settings/role-order")
+      .then((response) => (response.ok ? response.json() : Promise.reject()))
+      .then((payload: { roles: string[] }) => { if (payload.roles?.length) setRoleOrder(payload.roles); })
+      .catch(() => undefined);
     fetch("/api/settings/name-sequence")
       .then((response) => (response.ok ? response.json() : Promise.reject()))
       .then((payload: { enabled: boolean }) => setNameWithSequence(Boolean(payload.enabled)))
@@ -252,8 +270,8 @@ export default function App() {
       setError("單一案件最多 30 張照片。");
       return;
     }
-    const defaults = initialRoles(combinedCount);
-    const currentDefaults = initialRoles(photos.length);
+    const defaults = initialRoles(combinedCount, roleOrder);
+    const currentDefaults = initialRoles(photos.length, roleOrder);
     const rolesAreAutomatic = photos.every(
       (photo, index) => photo.role === currentDefaults[index],
     );
@@ -270,6 +288,25 @@ export default function App() {
       ...additions,
     ]);
     setSelectedPhotoId((current) => current || additions[0].id);
+  }
+
+  function changeRoleOrder(roles: string[]) {
+    setRoleOrder(roles);
+    fetch("/api/settings/role-order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roles }),
+    }).catch(() => setError("無法儲存預設角色順序。"));
+  }
+
+  function movePhoto(from: number, to: number) {
+    setPhotos((current) => moveItem(current, from, to));
+  }
+
+  function endPhotoDrag() {
+    draggedPhoto.current = "";
+    setDraggedPhotoId("");
+    setDragOverPhotoId("");
   }
 
   function removePhoto(id: string) {
@@ -685,7 +722,7 @@ export default function App() {
           <section
             className={`photo-rail ${dragging ? "dragging" : ""}`}
             aria-label="本次照片"
-            onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
+            onDragEnter={(event) => { event.preventDefault(); if (!draggedPhoto.current) setDragging(true); }}
             onDragOver={(event) => event.preventDefault()}
             onDragLeave={(event) => {
               if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -695,6 +732,7 @@ export default function App() {
             onDrop={(event) => {
               event.preventDefault();
               setDragging(false);
+              if (draggedPhoto.current) return; // 縮圖排序，不是新增檔案
               addFiles(event.dataTransfer.files);
             }}
           >
@@ -715,18 +753,41 @@ export default function App() {
             ) : (
               <div className="thumbnail-list">
                 {photos.map((photo, index) => (
-                  <div className={`thumbnail-item ${photo.id === selectedPhoto?.id ? "selected" : ""}`} key={photo.id}>
+                  <div
+                    className={`thumbnail-item ${photo.id === selectedPhoto?.id ? "selected" : ""} ${draggedPhotoId === photo.id ? "dragging" : ""} ${dragOverPhotoId === photo.id ? "drop-target" : ""}`}
+                    key={photo.id}
+                    draggable
+                    onDragStart={() => { draggedPhoto.current = photo.id; setDraggedPhotoId(photo.id); }}
+                    onDragOver={(event) => {
+                      if (!draggedPhoto.current) return;
+                      event.preventDefault();
+                      setDragOverPhotoId(photo.id);
+                    }}
+                    onDragEnd={endPhotoDrag}
+                    onDrop={(event) => {
+                      if (!draggedPhoto.current) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      movePhoto(photos.findIndex((item) => item.id === draggedPhoto.current), index);
+                      endPhotoDrag();
+                    }}
+                  >
                     <button type="button" className="thumbnail-button" onClick={() => setSelectedPhotoId(photo.id)}>
                       <img src={photo.url} alt={`${photo.role}：${photo.file.name}`} />
                       <span className="thumbnail-copy"><strong>{photo.role}</strong><small>{photo.file.name}</small></span>
                     </button>
                     <button type="button" className="remove-photo" aria-label={`移除 ${photo.file.name}`} onClick={() => removePhoto(photo.id)}>×</button>
                     <span className="photo-number">{String(index + 1).padStart(2, "0")}</span>
+                    <span className="move-photo">
+                      <button type="button" aria-label={`將 ${photo.file.name} 往前移`} disabled={index === 0} onClick={() => movePhoto(index, index - 1)}>◀</button>
+                      <button type="button" aria-label={`將 ${photo.file.name} 往後移`} disabled={index === photos.length - 1} onClick={() => movePhoto(index, index + 1)}>▶</button>
+                    </span>
                   </div>
                 ))}
                 <button className="add-more" type="button" onClick={() => fileInput.current?.click()}>＋ 加入照片</button>
               </div>
             )}
+            <RoleOrderEditor roles={roleOrder} allRoles={references.photo_roles} onChange={changeRoleOrder} />
             <input
               ref={fileInput}
               className="sr-only"
