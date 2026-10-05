@@ -37,6 +37,7 @@ export default function App() {
   const [caseTotal, setCaseTotal] = useState(0);
   const [casePages, setCasePages] = useState(1);
   const [scanningCases, setScanningCases] = useState(false);
+  const [nameWithSequence, setNameWithSequence] = useState(false);
   const [overviewView, setOverviewView] = useState<"gallery" | "names" | null>(null);
   const [selectedCase, setSelectedCase] = useState<CaseRecord | null>(null);
   const [saving, setSaving] = useState(false);
@@ -99,7 +100,10 @@ export default function App() {
 
   const selectedIndex = photos.findIndex((photo) => photo.id === selectedPhotoId);
   const selectedPhoto = selectedIndex >= 0 ? photos[selectedIndex] : photos[0];
-  const generatedNames = useMemo(() => roleFileNames(photos), [photos]);
+  const generatedNames = useMemo(
+    () => roleFileNames(photos, nameWithSequence),
+    [photos, nameWithSequence],
+  );
 
   const folderPreview = useMemo(() => {
     const issueText = issues.map(safeName).join("-");
@@ -205,6 +209,10 @@ export default function App() {
     fetch("/api/settings/storage")
       .then((response) => (response.ok ? response.json() : Promise.reject()))
       .then((payload: { path: string }) => setStorageRoot(payload.path))
+      .catch(() => undefined);
+    fetch("/api/settings/name-sequence")
+      .then((response) => (response.ok ? response.json() : Promise.reject()))
+      .then((payload: { enabled: boolean }) => setNameWithSequence(Boolean(payload.enabled)))
       .catch(() => undefined);
     fetch("/api/settings/free-scan-path")
       .then((response) => (response.ok ? response.json() : Promise.reject()))
@@ -319,6 +327,7 @@ export default function App() {
     form.set("location", location);
     form.set("notes", notes);
     form.set("photo_roles", JSON.stringify(photos.map((photo) => photo.role)));
+    form.set("name_with_sequence", nameWithSequence ? "true" : "false");
     if (storageMode === "month") {
       form.set("storage_month", selectedMonth);
       form.set("storage_subfolder", selectedSubfolder);
@@ -394,12 +403,20 @@ export default function App() {
       const relinked = Number(payload.relinked ?? 0);
       const imported = Number(payload.imported ?? 0);
       const removed = Number(payload.removed ?? 0);
+      const renamedPhotos = Number(payload.photos_renamed ?? 0);
+      const addedPhotos = Number(payload.photos_added ?? 0);
+      const updatedPhotos = Number(payload.photos_updated ?? 0);
+      const removedPhotos = Number(payload.photos_removed ?? 0);
       const pending = Number(payload.unresolved ?? 0) + Number(payload.ambiguous ?? 0) + Number(payload.skipped ?? 0);
-      if (relinked || imported || removed) {
+      if (relinked || imported || removed || renamedPhotos || addedPhotos || updatedPhotos || removedPhotos) {
         const changes = [
           relinked ? `重新連結 ${relinked} 筆案件` : "",
           imported ? `新增 ${imported} 筆案件` : "",
           removed ? `清除 ${removed} 筆失效紀錄` : "",
+          renamedPhotos ? `更新 ${renamedPhotos} 張照片檔名` : "",
+          addedPhotos ? `加入 ${addedPhotos} 張新照片` : "",
+          updatedPhotos ? `更新 ${updatedPhotos} 張被編修的照片` : "",
+          removedPhotos ? `移除 ${removedPhotos} 筆找不到檔案的照片紀錄` : "",
         ].filter(Boolean).join("、");
         setNotice(`掃描完成，已${changes}${pending ? `，另有 ${pending} 筆無法自動確認` : ""}。`);
       } else if (pending) {
@@ -487,6 +504,15 @@ export default function App() {
     }
   }
 
+
+  function changeNameSequence(enabled: boolean) {
+    setNameWithSequence(enabled);
+    fetch("/api/settings/name-sequence", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    }).catch(() => setError("無法儲存檔名序號設定。"));
+  }
 
   function toggleFolderPreset(name: string) {
     setFolderPresets((current) => (
@@ -732,6 +758,14 @@ export default function App() {
                 <div className="generated-name"><span>儲存檔名</span><strong>{generatedNames[selectedIndex]}</strong></div>
               </div>
             )}
+            <label className="name-sequence-toggle">
+              <input
+                type="checkbox"
+                checked={nameWithSequence}
+                onChange={(event) => changeNameSequence(event.target.checked)}
+              />
+              檔名加上序號（01_、02_…）
+            </label>
             <div className="path-preview">
               <span>案件資料夾</span>
               <code>{folderPreview}</code>

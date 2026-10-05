@@ -33,16 +33,18 @@ export function safeName(value: string): string {
   return value.replace(/[<>:"/\\|?*\x00-\x1f]/g, "-").replace(/\s+/g, " ").trim();
 }
 
-export function roleFileNames(photos: PhotoDraft[]): string[] {
+export function roleFileNames(photos: PhotoDraft[], withSequence: boolean): string[] {
   const totals = new Map<string, number>();
   const seen = new Map<string, number>();
   photos.forEach((photo) => totals.set(photo.role, (totals.get(photo.role) ?? 0) + 1));
   return photos.map((photo, index) => {
     const current = (seen.get(photo.role) ?? 0) + 1;
     seen.set(photo.role, current);
-    const suffix = totals.get(photo.role)! > 1 ? `-${String(current).padStart(2, "0")}` : "";
+    // 同角色多張：前-1、前-2、前-3；只有一張就只有角色名
+    const suffix = totals.get(photo.role)! > 1 ? `-${current}` : "";
     const extension = photo.file.name.split(".").pop()?.toLowerCase() || "jpg";
-    return `${String(index + 1).padStart(2, "0")}_${photo.role}${suffix}.${extension}`;
+    const prefix = withSequence ? `${String(index + 1).padStart(2, "0")}_` : "";
+    return `${prefix}${photo.role}${suffix}.${extension}`;
   });
 }
 

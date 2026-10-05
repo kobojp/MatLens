@@ -273,3 +273,5 @@ legend { margin-bottom: 7px; color: #5e6d75; font-size: 12px; }
 .overview-lightbox > button { width: 44px; height: 44px; border: 0; border-radius: 50%; font-size: 26px; color: #fff; background: rgba(255,255,255,.18); }
 .overview-lightbox > button:disabled { opacity: .3; }
 .overview-lightbox > .overview-lightbox-close { position: absolute; top: 14px; right: 16px; }
+
+.name-sequence-toggle { display: flex; align-items: center; gap: 7px; margin: 8px 0 2px; font-size: 13px; color: #44525a; }

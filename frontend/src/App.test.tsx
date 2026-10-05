@@ -226,6 +226,31 @@ describe("照片拖放", () => {
     expect(screen.queryByRole("button", { name: "火警細項 無回應" })).not.toBeInTheDocument();
   });
 
+  it("檔名序號預設不勾；同角色多張為 前-1、前-2，勾選後加 01_ 並儲存設定", async () => {
+    const fetchMock = vi.mocked(fetch);
+    render(<App />);
+    const toggle = screen.getByRole("checkbox", { name: /檔名加上序號/ });
+    expect(toggle).not.toBeChecked();
+
+    const first = new File(["one"], "a.jpg", { type: "image/jpeg" });
+    const second = new File(["two"], "b.jpg", { type: "image/jpeg" });
+    fireEvent.drop(screen.getByRole("button", { name: /拉入 3～5 張照片/ }), {
+      dataTransfer: { files: [first, second] },
+    });
+    await screen.findByText("a.jpg");
+    fireEvent.change(screen.getByLabelText("這張照片是"), { target: { value: "前" } });
+    fireEvent.click(screen.getByRole("button", { name: /完成：b\.jpg/ }));
+    fireEvent.change(screen.getByLabelText("這張照片是"), { target: { value: "前" } });
+    expect(screen.getByText("前-2.jpg")).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(screen.getByText("02_前-2.jpg")).toBeInTheDocument();
+    const saved = fetchMock.mock.calls.find(
+      ([url, init]) => String(url).includes("settings/name-sequence") && init?.method === "POST",
+    );
+    expect(JSON.parse(String(saved?.[1]?.body))).toEqual({ enabled: true });
+  });
+
   it("可新增並立即選用自訂材料", async () => {
     render(<App />);
 
