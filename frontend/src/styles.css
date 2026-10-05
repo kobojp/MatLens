@@ -295,3 +295,8 @@ legend { margin-bottom: 7px; color: #5e6d75; font-size: 12px; }
 .role-chip-index { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; font-size: 10px; color: #fff; background: #1f6f5c; }
 .role-chip button { padding: 0 3px; border: 0; font-size: 11px; color: #44525a; background: transparent; }
 .role-chip button:disabled { opacity: .3; }
+
+.overview-names-mode { display: flex; }
+.overview-names-mode button { padding: 6px 14px; border: 1px solid #cbd5da; background: #fff; }
+.overview-names-mode button + button { border-left: 0; }
+.overview-names-mode button.active { color: #fff; background: #1f6f5c; border-color: #1f6f5c; }

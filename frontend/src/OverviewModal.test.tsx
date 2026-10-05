@@ -119,12 +119,30 @@ describe("照片總覽", () => {
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     renderModal("names");
 
-    const box = (await screen.findByLabelText("檔名清單內容")) as HTMLTextAreaElement;
+    const box = (await screen.findByRole("textbox", { name: "檔名清單內容" })) as HTMLTextAreaElement;
     expect(box.value).toBe(overview.filenames);
     fireEvent.click(screen.getByRole("button", { name: "全部複製" }));
 
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(overview.filenames));
     expect(await screen.findByRole("button", { name: "已複製" })).toBeInTheDocument();
+  });
+
+  it("檔名清單可切換成只列資料夾名稱，複製內容跟著切換", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    renderModal("names");
+    const box = (await screen.findByRole("textbox", { name: "檔名清單內容" })) as HTMLTextAreaElement;
+    expect(box.value).toContain("01_前.jpg");
+
+    fireEvent.click(screen.getByRole("button", { name: "只列資料夾名稱" }));
+    expect(box.value).toBe("二門診3F M3-07 錯誤設備\n三門診2F A1-01 火警-無回應");
+    fireEvent.click(screen.getByRole("button", { name: "全部複製" }));
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith("二門診3F M3-07 錯誤設備\n三門診2F A1-01 火警-無回應"),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "含圖檔名稱" }));
+    expect(box.value).toBe(overview.filenames);
   });
 
   it("可輸出輕量版與獨立版網頁", async () => {

@@ -40,6 +40,7 @@ export default function OverviewModal({
   const [autoScan, setAutoScan] = useState(true);
   const [autoScanLoaded, setAutoScanLoaded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [namesMode, setNamesMode] = useState<"files" | "folders">("files");
   const [exporting, setExporting] = useState("");
   const [lightbox, setLightbox] = useState<{ caseIndex: number; photoIndex: number } | null>(null);
   const namesBox = useRef<HTMLTextAreaElement>(null);
@@ -115,9 +116,16 @@ export default function OverviewModal({
     void load();
   }
 
+  // 「只列資料夾名稱」：每個案件一行；「含圖檔名稱」：依案件分組，列出每張圖檔名
+  const namesText = data
+    ? namesMode === "folders"
+      ? data.cases.map((item) => item.title).join("\n")
+      : data.filenames
+    : "";
+
   async function copyNames() {
     if (!data) return;
-    const ok = await copyText(data.filenames, namesBox.current);
+    const ok = await copyText(namesText, namesBox.current);
     setCopied(ok);
     if (!ok) setError("無法自動複製，請手動選取文字複製。");
   }
@@ -246,12 +254,23 @@ export default function OverviewModal({
           )}
           {data && view === "names" && (
             <div className="overview-names">
-              <textarea ref={namesBox} readOnly aria-label="檔名清單內容" value={data.filenames} />
+              <div className="overview-names-mode" role="group" aria-label="檔名清單內容">
+                <button type="button" aria-pressed={namesMode === "folders"} className={namesMode === "folders" ? "active" : ""} onClick={() => { setNamesMode("folders"); setCopied(false); }}>
+                  只列資料夾名稱
+                </button>
+                <button type="button" aria-pressed={namesMode === "files"} className={namesMode === "files" ? "active" : ""} onClick={() => { setNamesMode("files"); setCopied(false); }}>
+                  含圖檔名稱
+                </button>
+              </div>
+              <textarea ref={namesBox} readOnly aria-label="檔名清單內容" value={namesText} />
               <div>
-                <button type="button" className="confirm" onClick={copyNames} disabled={!data.filenames}>
+                <button type="button" className="confirm" onClick={copyNames} disabled={!namesText}>
                   {copied ? "已複製" : "全部複製"}
                 </button>
-                <span>共 {data.total} 個案件，依案件分組，只列檔名。</span>
+                <span>
+                  共 {data.total} 個案件，
+                  {namesMode === "folders" ? "只列資料夾名稱。" : "依案件分組，列出每張圖檔名。"}
+                </span>
               </div>
             </div>
           )}
