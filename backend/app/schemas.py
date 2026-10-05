@@ -79,3 +79,18 @@ class OverviewExport(BaseModel):
 
 class NameSequenceSetting(BaseModel):
     enabled: bool
+
+
+class RoleOrderSetting(BaseModel):
+    roles: list[str] = Field(min_length=1, max_length=8)
+
+    @field_validator("roles")
+    @classmethod
+    def unique_known_roles(cls, values: list[str]) -> list[str]:
+        from .config import PHOTO_ROLES
+
+        cleaned = list(dict.fromkeys(value.strip() for value in values))
+        unknown = [value for value in cleaned if value not in PHOTO_ROLES]
+        if unknown:
+            raise ValueError(f"未知照片分類：{', '.join(unknown)}")
+        return cleaned

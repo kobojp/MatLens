@@ -1018,3 +1018,15 @@ def test_overview_from_disk_orders_unprefixed_photos_by_role(
         "中.jpg",
         "完成.jpg",
     ]
+
+
+def test_role_order_setting_defaults_validates_and_persists(client: TestClient) -> None:
+    assert client.get("/api/settings/role-order").json() == {"roles": ["前", "中", "後"]}
+
+    saved = client.post("/api/settings/role-order", json={"roles": ["前", "後", "完成", "前"]})
+    assert saved.json() == {"roles": ["前", "後", "完成"]}
+    assert client.get("/api/settings/role-order").json() == {"roles": ["前", "後", "完成"]}
+
+    assert client.post("/api/settings/role-order", json={"roles": []}).status_code == 422
+    assert client.post("/api/settings/role-order", json={"roles": ["不存在"]}).status_code == 422
+    assert client.get("/api/settings/role-order").json() == {"roles": ["前", "後", "完成"]}

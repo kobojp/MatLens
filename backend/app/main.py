@@ -42,6 +42,7 @@ from .schemas import (
     NameSequenceSetting,
     OverviewAutoScan,
     OverviewExport,
+    RoleOrderSetting,
     StorageFoldersCreate,
     StorageSettingsUpdate,
 )
@@ -423,6 +424,25 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     def set_name_sequence(settings: NameSequenceSetting) -> dict[str, bool]:
         set_setting(app.state.database_path, "name_with_sequence", "1" if settings.enabled else "0")
         return {"enabled": settings.enabled}
+
+    DEFAULT_ROLE_ORDER = ["前", "中", "後"]
+
+    @app.get("/api/settings/role-order")
+    def get_role_order() -> dict[str, list[str]]:
+        raw = get_setting(app.state.database_path, "role_order", "")
+        try:
+            roles = [role for role in json.loads(raw) if role in PHOTO_ROLES] if raw else []
+        except (json.JSONDecodeError, TypeError):
+            roles = []
+        return {"roles": roles or DEFAULT_ROLE_ORDER}
+
+    @app.post("/api/settings/role-order")
+    def set_role_order(settings: RoleOrderSetting) -> dict[str, list[str]]:
+        set_setting(
+            app.state.database_path, "role_order",
+            json.dumps(settings.roles, ensure_ascii=False),
+        )
+        return {"roles": settings.roles}
 
     @app.get("/api/settings/overview-auto-scan")
     def get_overview_auto_scan() -> dict[str, bool]:
