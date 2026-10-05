@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import sqlite3
@@ -9,21 +8,19 @@ from collections import defaultdict
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from PIL import Image, UnidentifiedImageError
-
-from ..config import ALLOWED_IMAGE_FORMATS, BUILDINGS, PHOTO_ROLES
+from ..config import BUILDINGS
 from ..db import connect
 from ..schemas import CaseCreate
 from .errors import StorageError
-from .records import insert_case_row, insert_photo_row
-
-SCANNED_PHOTO_RE = re.compile(
-    rf"^(?P<sequence>\d+)_"
-    rf"(?P<role>{'|'.join(re.escape(role) for role in PHOTO_ROLES)})"
-    r"(?:-\d+)?\.(?:jpe?g|png|webp)$",
-    re.IGNORECASE,
+from .naming import SCANNED_PHOTO_RE, role_from_filename, role_rank
+from .photo_sync import (
+    FolderIndex,
+    list_images,
+    read_image_info,
+    refresh_case_from_folder,
+    sync_case_photos,
 )
-
+from .records import insert_case_row, insert_photo_row
 
 FLOOR_SUFFIX_RE = re.compile(r"^(?P<building>.+?)(?P<floor>B?\d+F|B\d+|RF)$", re.IGNORECASE)
 
@@ -113,50 +110,69 @@ def _automatic_roles(count: int) -> list[str]:
 
 
 def _photos_from_folder(folder: Path) -> list[dict[str, object]]:
-    photos: list[dict[str, object]] = []
-    try:
-        files = sorted(folder.iterdir(), key=lambda path: path.name.casefold())
-    except OSError:
-        return []
-    for path in files:
-        match = SCANNED_PHOTO_RE.fullmatch(path.name)
-        if (
-            path.suffix.casefold() not in {".jpg", ".jpeg", ".png", ".webp"}
-            or not path.is_file()
-        ):
+    entries = []
+    for name, path in list_images(folder).items():
+        info = read_image_info(path)
+        if info is None:
             continue
-        try:
-            with path.open("rb") as photo_file:
-                digest = hashlib.file_digest(photo_file, "sha256").hexdigest()
-            with Image.open(path) as image:
-                image.verify()
-            with Image.open(path) as image:
-                image_format = (image.format or "").upper()
-                width, height = image.size
-            if image_format not in ALLOWED_IMAGE_FORMATS or width < 1 or height < 1:
-                continue
-            photos.append(
-                {
-                    "sequence": int(match.group("sequence")) if match else len(photos) + 1,
-                    "role": match.group("role") if match else "",
-                    "stored_name": path.name,
-                    "sha256": digest,
-                    "size_bytes": path.stat().st_size,
-                    "width": width,
-                    "height": height,
-                }
-            )
-        except (OSError, UnidentifiedImageError):
-            continue
-    photos.sort(
-        key=lambda photo: (int(photo["sequence"]), str(photo["stored_name"]).casefold())
+        match = SCANNED_PHOTO_RE.fullmatch(name)
+        sequence = int(match.group("sequence")) if match and match.group("sequence") else None
+        entries.append((sequence, role_from_filename(name), name, info))
+    # 有序號依序號；沒有序號則依 前、中、後、完成… 的角色順序，再依檔名
+    entries.sort(
+        key=lambda entry: (
+            entry[0] if entry[0] is not None else 10**6,
+            role_rank(entry[1]),
+            entry[2].casefold(),
+        )
     )
-    defaults = _automatic_roles(len(photos))
-    for sequence, photo in enumerate(photos, start=1):
-        photo["sequence"] = sequence
-        if not photo["role"]:
-            photo["role"] = defaults[sequence - 1]
+    defaults = _automatic_roles(len(entries))
+    photos: list[dict[str, object]] = []
+    for sequence, (_, role, name, info) in enumerate(entries, start=1):
+        photos.append(
+            {
+                "sequence": sequence,
+                "role": role or defaults[sequence - 1],
+                "stored_name": name,
+                "sha256": info.sha256,
+                "size_bytes": info.size_bytes,
+                "width": info.width,
+                "height": info.height,
+            }
+        )
     return photos
+
+
+def _relink_case(
+    connection: sqlite3.Connection,
+    case: sqlite3.Row,
+    root: Path,
+    folder: Path,
+    photo_rows: list[sqlite3.Row],
+) -> bool:
+    """把案件重新指向新資料夾；資料庫唯一性衝突時回傳 False 並保持原狀。"""
+    relative_folder = folder.relative_to(root).as_posix()
+    connection.execute("SAVEPOINT relink_case")
+    try:
+        connection.execute(
+            "UPDATE cases SET storage_root = ?, folder_path = ? WHERE id = ?",
+            (str(root), relative_folder, case["id"]),
+        )
+        for photo in photo_rows:
+            connection.execute(
+                "UPDATE photos SET stored_path = ? WHERE case_id = ? AND stored_name = ?",
+                (
+                    (Path(relative_folder) / photo["stored_name"]).as_posix(),
+                    case["id"],
+                    photo["stored_name"],
+                ),
+            )
+    except sqlite3.IntegrityError:
+        connection.execute("ROLLBACK TO SAVEPOINT relink_case")
+        connection.execute("RELEASE SAVEPOINT relink_case")
+        return False
+    connection.execute("RELEASE SAVEPOINT relink_case")
+    return True
 
 
 def rescan_case_locations(
@@ -164,7 +180,8 @@ def rescan_case_locations(
 ) -> dict[str, int]:
     """Relink missing registered case folders found uniquely under the selected root.
 
-    prune=False 時絕不刪除資料庫紀錄（自動掃描使用）；找不到資料夾的案件原樣保留。
+    也會依檔案內容辨識被改名的案件資料夾與照片，並讓資料庫檔名、角色與實際圖檔一致。
+    prune=False 時絕不刪除資料庫紀錄（自動掃描使用）；找不到資料夾或照片的紀錄原樣保留。
     """
     root = scan_root.resolve()
     if not root.is_dir():
@@ -203,10 +220,17 @@ def rescan_case_locations(
         unresolved = 0
         removed = 0
         blocked_import_names: set[str] = set()
+        occupied = {
+            (Path(case["storage_root"]).resolve() / case["folder_path"]).resolve()
+            for case in cases
+            if (Path(case["storage_root"]).resolve() / case["folder_path"]).is_dir()
+        }
+        folder_index = FolderIndex(scanned_directories)
         for case in cases_to_relink:
             candidates = matches.get(Path(case["folder_path"]).name.casefold(), [])
             photo_rows = connection.execute(
-                "SELECT stored_name FROM photos WHERE case_id = ? ORDER BY sequence",
+                "SELECT stored_name, sha256, size_bytes FROM photos "
+                "WHERE case_id = ? ORDER BY sequence",
                 (case["id"],),
             ).fetchall()
             candidates = [
@@ -224,29 +248,52 @@ def rescan_case_locations(
                     if old_folder.is_dir():
                         unresolved += 1
                         blocked_import_names.add(case_name)
-                    elif prune:
-                        connection.execute("DELETE FROM cases WHERE id = ?", (case["id"],))
-                        removed += 1
+                    else:
+                        # 原資料夾已不存在：依照片內容找出被改名／搬移的資料夾
+                        content_matches = folder_index.find_matches(photo_rows, occupied)
+                        if len(content_matches) == 1:
+                            target = content_matches[0]
+                            if _relink_case(connection, case, root, target, photo_rows):
+                                occupied.add(target.resolve())
+                                refresh_case_from_folder(
+                                    connection, case["id"], target, root, _case_from_folder(target)
+                                )
+                                relinked += 1
+                            else:
+                                ambiguous += 1
+                        elif len(content_matches) > 1:
+                            ambiguous += 1
+                        elif prune:
+                            connection.execute("DELETE FROM cases WHERE id = ?", (case["id"],))
+                            removed += 1
                 continue
 
-            relative_folder = candidates[0].relative_to(root).as_posix()
-            try:
-                connection.execute(
-                    "UPDATE cases SET storage_root = ?, folder_path = ? WHERE id = ?",
-                    (str(root), relative_folder, case["id"]),
-                )
-                for photo in photo_rows:
-                    connection.execute(
-                        "UPDATE photos SET stored_path = ? WHERE case_id = ? AND stored_name = ?",
-                        (
-                            (Path(relative_folder) / photo["stored_name"]).as_posix(),
-                            case["id"],
-                            photo["stored_name"],
-                        ),
-                    )
+            if _relink_case(connection, case, root, candidates[0], photo_rows):
+                occupied.add(candidates[0].resolve())
                 relinked += 1
-            except sqlite3.IntegrityError:
+            else:
                 ambiguous += 1
+
+        photo_totals = {
+            "photos_renamed": 0,
+            "photos_added": 0,
+            "photos_updated": 0,
+            "photos_removed": 0,
+        }
+        for row in connection.execute("SELECT id, storage_root, folder_path FROM cases").fetchall():
+            case_root = Path(row["storage_root"]).resolve()
+            case_folder = (case_root / row["folder_path"]).resolve()
+            inside_root = case_folder == root or root in case_folder.parents
+            if not case_folder.is_dir() or not inside_root:
+                continue
+            for key, value in sync_case_photos(
+                connection,
+                case_id=row["id"],
+                root=case_root,
+                folder_path=row["folder_path"],
+                prune=prune,
+            ).items():
+                photo_totals[key] += value
 
         registered_paths = {
             (Path(row["storage_root"]).resolve() / row["folder_path"]).resolve()
@@ -315,4 +362,5 @@ def rescan_case_locations(
         "unresolved": unresolved,
         "ambiguous": ambiguous,
         "skipped": skipped,
+        **photo_totals,
     }

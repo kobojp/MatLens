@@ -23,6 +23,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from .db import connect
 from .schemas import CaseCreate
 from .storage.errors import StorageError
+from .storage.naming import SCANNED_PHOTO_RE, role_from_filename, role_rank
 from .storage.rescan import _case_from_folder, _fallback_case_from_folder
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -105,6 +106,13 @@ def collect_from_database(
     return cases
 
 
+def _photo_sort_key(path: Path) -> tuple[int, int, str]:
+    """有序號依序號；沒有序號則依 前、中、後、完成… 的角色順序，再依檔名。"""
+    matched = SCANNED_PHOTO_RE.fullmatch(path.name)
+    sequence = int(matched.group("sequence")) if matched and matched.group("sequence") else 10**6
+    return sequence, role_rank(role_from_filename(path.name)), path.name.casefold()
+
+
 def _images_in(folder: Path) -> list[Path]:
     try:
         entries = list(folder.iterdir())
@@ -116,7 +124,7 @@ def _images_in(folder: Path) -> list[Path]:
             for path in entries
             if path.suffix.casefold() in IMAGE_EXTENSIONS and path.is_file()
         ),
-        key=lambda path: path.name.casefold(),
+        key=_photo_sort_key,
     )
 
 

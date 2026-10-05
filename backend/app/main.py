@@ -39,6 +39,7 @@ from .overview import (
 from .schemas import (
     CaseCreate,
     CustomOptionCreate,
+    NameSequenceSetting,
     OverviewAutoScan,
     OverviewExport,
     StorageFoldersCreate,
@@ -320,6 +321,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         storage_subfolder: str = Form(...),
         free_scan_root: str = Form(default=""),
         free_with_date: str = Form(default="true"),
+        name_with_sequence: str = Form(default=""),
         photos: list[UploadFile] = File(...),
     ) -> dict[str, object]:
         try:
@@ -346,6 +348,11 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         ):
             raise HTTPException(status_code=422, detail="問題只能選擇一項，火警可再選一個細項")
 
+        # 檔名是否加 01_ 序號：前端明確傳入優先，否則使用已儲存的偏好（預設不加）
+        if name_with_sequence.strip():
+            use_sequence = name_with_sequence.strip().lower() == "true"
+        else:
+            use_sequence = get_setting(app.state.database_path, "name_with_sequence", "0") == "1"
         # 決定儲存根目錄與目的地
         use_free_mode = bool(free_scan_root.strip())
         # include_date：月份模式永遠帶日期；自由路徑模式依前端勾選決定
@@ -373,6 +380,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
                 storage_subfolder=storage_subfolder,
                 free_mode=use_free_mode,
                 include_date=include_date,
+                name_with_sequence=use_sequence,
             )
         except DuplicatePhotoError as error:
             raise HTTPException(
@@ -406,6 +414,15 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
 
     # ---- 照片總覽 ----
     app.state.overview_roots = {}
+
+    @app.get("/api/settings/name-sequence")
+    def get_name_sequence() -> dict[str, bool]:
+        return {"enabled": get_setting(app.state.database_path, "name_with_sequence", "0") == "1"}
+
+    @app.post("/api/settings/name-sequence")
+    def set_name_sequence(settings: NameSequenceSetting) -> dict[str, bool]:
+        set_setting(app.state.database_path, "name_with_sequence", "1" if settings.enabled else "0")
+        return {"enabled": settings.enabled}
 
     @app.get("/api/settings/overview-auto-scan")
     def get_overview_auto_scan() -> dict[str, bool]:

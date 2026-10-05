@@ -5,7 +5,6 @@ import json
 import os
 import shutil
 import uuid
-from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -16,6 +15,7 @@ from ..config import ALLOWED_IMAGE_FORMATS, MAX_PHOTO_BYTES, PHOTO_ROLES
 from ..db import connect
 from ..schemas import CaseCreate
 from .errors import DuplicatePhotoError, StorageError
+from .naming import stored_names as build_stored_names
 from .paths import resolve_free_destination, resolve_storage_destination, sanitize_component
 from .records import insert_case_row, insert_photo_row
 
@@ -59,19 +59,6 @@ def _available_case_path(
         candidate = destination / f"{name}-{suffix:02d}"
         suffix += 1
     return candidate
-
-
-def _stored_names(roles: list[str], extensions: list[str]) -> list[str]:
-    totals = Counter(roles)
-    seen: defaultdict[str, int] = defaultdict(int)
-    names: list[str] = []
-    for index, (role, extension) in enumerate(zip(roles, extensions, strict=True), start=1):
-        seen[role] += 1
-        role_name = role
-        if totals[role] > 1:
-            role_name = f"{role}-{seen[role]:02d}"
-        names.append(f"{index:02d}_{sanitize_component(role_name)}{extension.lower()}")
-    return names
 
 
 def _remove_empty_staging(staging_root: Path) -> None:
@@ -122,6 +109,7 @@ async def create_case(
     storage_subfolder: str,
     free_mode: bool = False,
     include_date: bool = True,
+    name_with_sequence: bool = False,
 ) -> dict[str, object]:
     if not uploads:
         raise StorageError("至少需要一張照片")
@@ -197,7 +185,7 @@ async def create_case(
             raise DuplicatePhotoError(duplicates)
 
         extensions = [str(item["extension"]) for item in staged]
-        stored_names = _stored_names(roles, extensions)
+        stored_names = build_stored_names(roles, extensions, with_sequence=name_with_sequence)
         for item, stored_name in zip(staged, stored_names, strict=True):
             temporary_path = Path(str(item["temporary_path"]))
             temporary_path.rename(staging_dir / stored_name)

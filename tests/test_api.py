@@ -33,6 +33,7 @@ def create_case(
     *,
     storage_month: str = "8月",
     storage_subfolder: str = "底座",
+    name_with_sequence: str = "true",
 ) -> object:
     roles = ["前", "中", "完成"][: len(colors)]
     return client.post(
@@ -49,6 +50,7 @@ def create_case(
             "photo_roles": str(roles).replace("'", '"'),
             "storage_month": storage_month,
             "storage_subfolder": storage_subfolder,
+            "name_with_sequence": name_with_sequence,
         },
         files=[
             ("photos", (f"photo-{index}.jpg", jpeg_bytes(color), "image/jpeg"))
@@ -115,7 +117,7 @@ def test_after_and_complete_are_equivalent_completion_roles(
     assert response.status_code == 201
     assert response.json()["is_complete"] is True
     assert response.json()["missing_roles"] == []
-    assert response.json()["photos"][2]["stored_name"] == "03_後.jpg"
+    assert response.json()["photos"][2]["stored_name"] == "後.jpg"
 
 
 def test_cases_are_paginated(client: TestClient, tmp_path: Path) -> None:
@@ -755,3 +757,264 @@ def test_rescan_without_prune_keeps_records_of_missing_folders(
     pruned = client.post("/api/cases/rescan", params={"path": str(elsewhere)})
     assert pruned.json()["removed"] == 1
     assert client.get("/api/cases").json()["total"] == 0
+
+
+def _post_case(client: TestClient, roles: list[str], **fields: str) -> dict:
+    data = {
+        "work_date": "2026-08-17",
+        "building": "二門診",
+        "floor": "3F",
+        "address_code": "M3-07",
+        "material": "底座",
+        "issues": '["錯誤設備"]',
+        "location": "走廊東側",
+        "notes": "原備註",
+        "photo_roles": str(roles).replace("'", '"'),
+        "storage_month": "8月",
+        "storage_subfolder": "底座",
+        **fields,
+    }
+    files = [
+        ("photos", (f"p{index}.jpg", jpeg_bytes((index * 20, 90, 200 - index * 10)), "image/jpeg"))
+        for index in range(1, len(roles) + 1)
+    ]
+    response = client.post("/api/cases", data=data, files=files)
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def _names(client: TestClient, case_id: str) -> list[str]:
+    return [photo["stored_name"] for photo in client.get(f"/api/cases/{case_id}").json()["photos"]]
+
+
+def test_stored_names_without_sequence_use_dash_numbers(
+    client: TestClient, tmp_path: Path
+) -> None:
+    (tmp_path / "photos" / "8月" / "底座").mkdir(parents=True)
+    roles = ["前", "前", "前", "中", "完成"]
+
+    plain = _post_case(client, roles, name_with_sequence="false")
+    assert _names(client, plain["id"]) == ["前-1.jpg", "前-2.jpg", "前-3.jpg", "中.jpg", "完成.jpg"]
+
+
+def test_stored_names_with_sequence_keep_prefix(client: TestClient, tmp_path: Path) -> None:
+    (tmp_path / "photos" / "8月" / "底座").mkdir(parents=True)
+    roles = ["前", "前", "中"]
+
+    numbered = _post_case(client, roles, name_with_sequence="true")
+    assert _names(client, numbered["id"]) == ["01_前-1.jpg", "02_前-2.jpg", "03_中.jpg"]
+
+
+def test_name_sequence_setting_defaults_off_and_applies_when_field_omitted(
+    client: TestClient, tmp_path: Path
+) -> None:
+    (tmp_path / "photos" / "8月" / "底座").mkdir(parents=True)
+    assert client.get("/api/settings/name-sequence").json() == {"enabled": False}
+
+    default_case = _post_case(client, ["前", "中"])
+    assert _names(client, default_case["id"]) == ["前.jpg", "中.jpg"]
+
+    client.post("/api/settings/name-sequence", json={"enabled": True})
+    assert client.get("/api/settings/name-sequence").json() == {"enabled": True}
+    (tmp_path / "photos" / "8月" / "探頭").mkdir(parents=True)
+    # 新案件使用不同顏色避免重複照片
+    other = client.post(
+        "/api/cases",
+        data={
+            "work_date": "2026-08-18",
+            "building": "二門診",
+            "floor": "3F",
+            "address_code": "M3-09",
+            "material": "探頭",
+            "issues": '["無回應"]',
+            "photo_roles": '["前"]',
+            "storage_month": "8月",
+            "storage_subfolder": "探頭",
+        },
+        files=[("photos", ("x.jpg", jpeg_bytes((250, 1, 1)), "image/jpeg"))],
+    ).json()
+    assert _names(client, other["id"]) == ["01_前.jpg"]
+
+
+def test_rescan_updates_renamed_photo_names_and_roles(
+    client: TestClient, tmp_path: Path
+) -> None:
+    (tmp_path / "photos" / "8月" / "底座").mkdir(parents=True)
+    created = _post_case(client, ["前", "中", "完成"], name_with_sequence="true")
+    folder = tmp_path / "photos" / created["folder_path"]
+    (folder / "01_前.jpg").rename(folder / "前-1.jpg")
+    (folder / "02_中.jpg").rename(folder / "現場近照.jpg")  # 不含角色：角色保留
+    (folder / "03_完成.jpg").rename(folder / "後.jpg")  # 含角色：角色跟著變
+
+    result = client.post(
+        "/api/cases/rescan", params={"path": str(tmp_path / "photos"), "prune": "false"}
+    ).json()
+
+    assert result["photos_renamed"] == 3
+    detail = client.get(f"/api/cases/{created['id']}").json()
+    assert [(p["stored_name"], p["role"]) for p in detail["photos"]] == [
+        ("前-1.jpg", "前"),
+        ("現場近照.jpg", "中"),
+        ("後.jpg", "後"),
+    ]
+    assert client.get(detail["photos"][1]["content_url"]).status_code == 200
+    assert client.get("/api/overview", params={"material": "底座"}).json()["filenames"].count(
+        "現場近照.jpg"
+    ) == 1
+    again = client.post("/api/cases/rescan", params={"path": str(tmp_path / "photos")}).json()
+    assert again["photos_renamed"] == 0
+
+
+def test_rescan_handles_swapped_names_and_new_and_modified_photos(
+    client: TestClient, tmp_path: Path
+) -> None:
+    (tmp_path / "photos" / "8月" / "底座").mkdir(parents=True)
+    created = _post_case(client, ["前", "中"], name_with_sequence="true")
+    folder = tmp_path / "photos" / created["folder_path"]
+    first, second = folder / "01_前.jpg", folder / "02_中.jpg"
+    swap = folder / "swap.tmp"
+    first.rename(swap)
+    second.rename(first)
+    swap.rename(second)
+    (folder / "後-新增.jpg").write_bytes(jpeg_bytes((9, 200, 9)))
+    (folder / "重複.jpg").write_bytes(first.read_bytes())
+
+    result = client.post(
+        "/api/cases/rescan", params={"path": str(tmp_path / "photos"), "prune": "false"}
+    ).json()
+
+    assert result["photos_added"] == 1
+    detail = client.get(f"/api/cases/{created['id']}").json()
+    assert detail["photo_count"] == 3
+    assert sorted(p["stored_name"] for p in detail["photos"]) == [
+        "01_前.jpg",
+        "02_中.jpg",
+        "後-新增.jpg",
+    ]
+    added = next(p for p in detail["photos"] if p["stored_name"] == "後-新增.jpg")
+    assert added["role"] == "後"
+
+    big = Image.new("RGB", (400, 300), (1, 2, 3))
+    buffer = io.BytesIO()
+    big.save(buffer, format="JPEG")
+    (folder / "後-新增.jpg").write_bytes(buffer.getvalue())
+    updated = client.post(
+        "/api/cases/rescan", params={"path": str(tmp_path / "photos"), "prune": "false"}
+    ).json()
+    assert updated["photos_updated"] == 1
+    refreshed = client.get(f"/api/cases/{created['id']}").json()
+    assert next(p for p in refreshed["photos"] if p["stored_name"] == "後-新增.jpg")[
+        "width"
+    ] == 400
+
+
+def test_rescan_missing_photo_is_only_removed_when_pruning(
+    client: TestClient, tmp_path: Path
+) -> None:
+    (tmp_path / "photos" / "8月" / "底座").mkdir(parents=True)
+    created = _post_case(client, ["前", "中"], name_with_sequence="true")
+    (tmp_path / "photos" / created["folder_path"] / "02_中.jpg").unlink()
+
+    kept = client.post(
+        "/api/cases/rescan", params={"path": str(tmp_path / "photos"), "prune": "false"}
+    ).json()
+    assert kept["photos_removed"] == 0
+    assert client.get(f"/api/cases/{created['id']}").json()["photo_count"] == 2
+
+    pruned = client.post("/api/cases/rescan", params={"path": str(tmp_path / "photos")}).json()
+    assert pruned["photos_removed"] == 1
+    detail = client.get(f"/api/cases/{created['id']}").json()
+    assert detail["photo_count"] == 1
+    assert [p["stored_name"] for p in detail["photos"]] == ["01_前.jpg"]
+
+
+def test_rescan_follows_renamed_case_folder_and_photos_by_content(
+    client: TestClient, tmp_path: Path
+) -> None:
+    (tmp_path / "photos" / "8月" / "底座").mkdir(parents=True)
+    created = _post_case(client, ["前", "中", "完成"], name_with_sequence="true")
+    old_folder = tmp_path / "photos" / created["folder_path"]
+    new_folder = old_folder.with_name("2026-08-17 二門診4F M3-99 漏水")
+    old_folder.rename(new_folder)
+    (new_folder / "01_前.jpg").rename(new_folder / "前.jpg")
+
+    result = client.post("/api/cases/rescan", params={"path": str(tmp_path / "photos")}).json()
+
+    assert result["relinked"] == 1
+    assert result["removed"] == 0 and result["imported"] == 0
+    assert client.get("/api/cases").json()["total"] == 1
+    detail = client.get(f"/api/cases/{created['id']}").json()
+    assert Path(detail["folder_path"]).name == "2026-08-17 二門診4F M3-99 漏水"
+    assert (detail["floor"], detail["address_code"], detail["issues"]) == ("4F", "M3-99", ["漏水"])
+    assert (detail["location"], detail["notes"]) == ("走廊東側", "原備註")
+    assert [p["stored_name"] for p in detail["photos"]] == ["前.jpg", "02_中.jpg", "03_完成.jpg"]
+    for photo in detail["photos"]:
+        assert client.get(photo["content_url"]).status_code == 200
+
+
+def test_rescan_content_relink_ignores_ambiguous_folders(
+    client: TestClient, tmp_path: Path
+) -> None:
+    (tmp_path / "photos" / "8月" / "底座").mkdir(parents=True)
+    created = _post_case(client, ["前"], name_with_sequence="true")
+    old_folder = tmp_path / "photos" / created["folder_path"]
+    copy_a = old_folder.with_name("2026-08-17 二門診5F A-01 漏水")
+    copy_b = old_folder.with_name("2026-08-17 二門診6F B-02 漏水")
+    for copy in (copy_a, copy_b):
+        copy.mkdir()
+        shutil.copy2(old_folder / "01_前.jpg", copy / "01_前.jpg")
+    shutil.rmtree(old_folder)
+
+    result = client.post(
+        "/api/cases/rescan", params={"path": str(tmp_path / "photos"), "prune": "false"}
+    ).json()
+
+    assert result["ambiguous"] == 1 and result["relinked"] == 0
+    assert client.get(f"/api/cases/{created['id']}").json()["folder_path"] == created["folder_path"]
+
+
+def test_rescan_imports_unprefixed_photo_names_in_role_order(
+    client: TestClient, tmp_path: Path
+) -> None:
+    root = tmp_path / "無序號"
+    folder = root / "底座" / "2026-09-22 二門診1F M3-07 錯誤設備"
+    folder.mkdir(parents=True)
+    colors = {
+        "完成.jpg": (3, 3, 3),
+        "前-2.jpg": (4, 4, 4),
+        "前-1.jpg": (5, 5, 5),
+        "中.jpg": (6, 6, 6),
+    }
+    for name, color in colors.items():
+        (folder / name).write_bytes(jpeg_bytes(color))
+
+    assert client.post("/api/cases/rescan", params={"path": str(root)}).json()["imported"] == 1
+    case = client.get("/api/cases").json()["items"][0]
+    detail = client.get(f"/api/cases/{case['id']}").json()
+
+    assert [(p["stored_name"], p["role"]) for p in detail["photos"]] == [
+        ("前-1.jpg", "前"),
+        ("前-2.jpg", "前"),
+        ("中.jpg", "中"),
+        ("完成.jpg", "完成"),
+    ]
+
+
+def test_overview_from_disk_orders_unprefixed_photos_by_role(
+    client: TestClient, tmp_path: Path
+) -> None:
+    root = tmp_path / "排序"
+    folder = root / "底座" / "2026-09-22 二門診1F M3-07 錯誤設備"
+    folder.mkdir(parents=True)
+    colors = {"完成.jpg": 1, "中.jpg": 2, "前-2.jpg": 3, "前-1.jpg": 4}
+    for name, shade in colors.items():
+        (folder / name).write_bytes(jpeg_bytes((shade, shade, shade)))
+
+    data = client.get("/api/overview", params={"source": "disk", "path": str(root)}).json()
+
+    assert [photo["name"] for photo in data["cases"][0]["photos"]] == [
+        "前-1.jpg",
+        "前-2.jpg",
+        "中.jpg",
+        "完成.jpg",
+    ]

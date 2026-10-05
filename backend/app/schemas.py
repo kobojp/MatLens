@@ -75,3 +75,7 @@ class OverviewExport(BaseModel):
     path: str = ""
     mode: Literal["light", "standalone"] = "light"
     reveal: bool = True
+
+
+class NameSequenceSetting(BaseModel):
+    enabled: bool
