@@ -127,15 +127,15 @@ export default function App() {
       const subfolder = freeSelectedSubfolder || "請選子目錄";
       // 日期受 freeWithDate 控制，放在案件資料夾名稱中
       const caseParts = freeWithDate
-        ? [workDate, buildingFloor, addressCode, issueText]
-        : [buildingFloor, addressCode, issueText];
+        ? [workDate, buildingFloor, addressCode, material, issueText]
+        : [buildingFloor, addressCode, material, issueText];
       const caseFolder = caseParts.map(safeName).join(" ");
       return `${subfolder}\\${caseFolder}`;
     }
     // 月份模式：日期永遠在案件資料夾名稱，空白分隔
-    const caseFolder = [workDate, buildingFloor, addressCode, issueText].map(safeName).join(" ");
+    const caseFolder = [workDate, buildingFloor, addressCode, material, issueText].map(safeName).join(" ");
     return `${selectedMonth || "請選月份"}\\${selectedSubfolder || "請選子目錄"}\\${caseFolder}`;
-  }, [workDate, building, floor, addressCode, issues, selectedMonth, selectedSubfolder, storageMode, freeSelectedSubfolder, freeWithDate]);
+  }, [workDate, building, floor, addressCode, material, issues, selectedMonth, selectedSubfolder, storageMode, freeSelectedSubfolder, freeWithDate]);
 
 
   const destinationSubfolder = storageMode === "free" ? freeSelectedSubfolder : selectedSubfolder;

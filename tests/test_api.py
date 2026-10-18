@@ -559,7 +559,119 @@ def test_case_folder_name_joins_building_and_floor(
     (tmp_path / "photos" / "8月" / "底座").mkdir(parents=True)
     created = create_case(client, [(10, 20, 30)]).json()
 
-    assert Path(created["folder_path"]).name == "2026-08-17 二門診3F M3-07 錯誤設備"
+    assert Path(created["folder_path"]).name == "2026-08-17 二門診3F M3-07 底座 錯誤設備"
+
+
+@pytest.mark.parametrize("mode", ["month", "free", "free_without_date"])
+def test_custom_material_is_in_case_folder_and_survives_restart(
+    client: TestClient, tmp_path: Path, mode: str
+) -> None:
+    root = tmp_path / "photos"
+    destination = root / "10月" / "其他設備" if mode == "month" else root / "其他設備"
+    destination.mkdir(parents=True)
+    assert client.post(
+        "/api/reference-values/material", json={"value": "排煙風門馬達"}
+    ).status_code == 201
+    response = client.post(
+        "/api/cases",
+        data={
+            "work_date": "2026-10-06",
+            "building": "長青",
+            "floor": "3F",
+            "address_code": "M3-07",
+            "material": "排煙風門馬達",
+            "issues": '["故障"]',
+            "photo_roles": '["前"]',
+            "storage_month": "10月" if mode == "month" else "",
+            "storage_subfolder": "其他設備",
+            "free_scan_root": "" if mode == "month" else str(root),
+            "free_with_date": "false" if mode == "free_without_date" else "true",
+        },
+        files=[("photos", ("p.jpg", jpeg_bytes((12, 34, 56)), "image/jpeg"))],
+    )
+    assert response.status_code == 201
+    created = response.json()
+    name = "長青3F M3-07 排煙風門馬達 故障"
+    if mode != "free_without_date":
+        name = f"2026-10-06 {name}"
+    folder = root / created["folder_path"]
+    assert folder == destination / name
+    assert (folder / "前.jpg").is_file()
+
+    restarted = TestClient(create_app(
+        database_path=tmp_path / "matlens.db", photo_root=root,
+        frontend_dist=tmp_path / "missing-frontend",
+    ))
+    detail = restarted.get(f"/api/cases/{created['id']}").json()
+    assert detail["material"] == "排煙風門馬達"
+    assert detail["issues"] == ["故障"]
+    assert detail["folder_path"] == created["folder_path"]
+    assert restarted.get(detail["photos"][0]["content_url"]).status_code == 200
+
+    # 改名後掃描必須從新格式讀出材料，不能改成父目錄「其他設備」。
+    renamed = folder.with_name(name.replace("3F", "4F"))
+    folder.rename(renamed)
+    scan = restarted.post("/api/cases/rescan", params={"path": str(root)}).json()
+    assert scan["relinked"] == 1
+    detail = restarted.get(f"/api/cases/{created['id']}").json()
+    assert (detail["floor"], detail["material"], detail["issues"]) == (
+        "4F", "排煙風門馬達", ["故障"]
+    )
+
+
+@pytest.mark.parametrize("building_floor", ["長青3F", "新大樓B2", "長青 3F"])
+def test_scan_imports_material_from_new_case_folder_name(
+    client: TestClient, tmp_path: Path, building_floor: str
+) -> None:
+    root = tmp_path / "自由路徑"
+    folder = root / "其他設備" / f"2026-10-06 {building_floor} M3-07 排煙風門馬達 火警-無回應"
+    folder.mkdir(parents=True)
+    (folder / "前.jpg").write_bytes(jpeg_bytes((56, 78, 90)))
+    overview = client.get("/api/overview", params={
+        "source": "disk", "path": str(root), "material": "排煙風門馬達"
+    }).json()
+    assert overview["total"] == 1
+    assert overview["cases"][0]["material"] == "排煙風門馬達"
+    assert overview["cases"][0]["title"].endswith("M3-07 火警-無回應")
+    scan = client.post("/api/cases/rescan", params={"path": str(root)}).json()
+    assert scan["imported"] == 1
+    case = client.get("/api/cases").json()["items"][0]
+    assert case["material"] == "排煙風門馬達"
+    assert case["issues"] == ["火警", "無回應"]
+    assert case["floor"] == ("B2" if building_floor == "新大樓B2" else "3F")
+
+
+@pytest.mark.parametrize("include_material", [False, True])
+def test_scan_preserves_spaces_in_custom_material_and_issue(
+    client: TestClient, tmp_path: Path, include_material: bool
+) -> None:
+    material, issue = "排煙 風門馬達", "控制器 故障"
+    for kind, value in [("material", material), ("issue", issue)]:
+        assert client.post(
+            f"/api/reference-values/{kind}", json={"value": value}
+        ).status_code == 201
+    root = tmp_path / "含空白名稱"
+    tail = f"{material} {issue}" if include_material else issue
+    folder = root / material / f"2026-10-06 長青3F M3-07 {tail}"
+    folder.mkdir(parents=True)
+    (folder / "前.jpg").write_bytes(jpeg_bytes((56, 78, 90)))
+    scan = client.post("/api/cases/rescan", params={"path": str(root)}).json()
+    assert scan["imported"] == 1
+    case = client.get("/api/cases").json()["items"][0]
+    assert (case["material"], case["issues"]) == (material, [issue])
+    for kind, value in [("material", material), ("issue", issue)]:
+        assert client.request(
+            "DELETE", f"/api/reference-values/{kind}", json={"value": value}
+        ).status_code == 200
+    overview = client.get("/api/overview", params={
+        "source": "disk", "path": str(root), "material": material
+    }).json()
+    assert overview["total"] == 1
+    assert overview["cases"][0]["title"] == f"長青3F M3-07 {issue}"
+    folder.rename(folder.with_name(folder.name.replace("3F", "4F")))
+    assert client.post("/api/cases/rescan", params={"path": str(root)}).json()["relinked"] == 1
+    detail = client.get(f"/api/cases/{case['id']}").json()
+    assert (detail["floor"], detail["material"], detail["issues"]) == ("4F", material, [issue])
 
 
 def test_create_case_rejects_multiple_issues(client: TestClient, tmp_path: Path) -> None:
@@ -626,7 +738,7 @@ def test_fire_issue_accepts_one_detail_and_names_folder(
     assert response.status_code == 201
     created = response.json()
     assert created["issues"] == ["火警", "無回應"]
-    assert Path(created["folder_path"]).name == "2026-08-17 二門診3F M3-07 火警-無回應"
+    assert Path(created["folder_path"]).name == "2026-08-17 二門診3F M3-07 底座 火警-無回應"
 
 
 def test_staging_folder_is_removed_after_save(client: TestClient, tmp_path: Path) -> None:

@@ -32,6 +32,7 @@ def _case_folder_name(case: CaseCreate, *, include_date: bool = True) -> str:
     parts = [
         sanitize_component(case.building) + sanitize_component(case.floor),
         sanitize_component(case.address_code),
+        sanitize_component(case.material),
         sanitize_component(issue_text),
     ]
     if include_date:

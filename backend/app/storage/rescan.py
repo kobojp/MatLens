@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import sqlite3
 import uuid
 from collections import defaultdict
+from collections.abc import Iterable
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from ..config import BUILDINGS
+from ..config import BUILDINGS, ISSUES, MATERIALS
 from ..db import connect
 from ..schemas import CaseCreate
 from .errors import StorageError
 from .naming import SCANNED_PHOTO_RE, role_from_filename, role_rank
+from .paths import sanitize_component
 from .photo_sync import (
     FolderIndex,
     list_images,
@@ -26,7 +29,7 @@ FLOOR_SUFFIX_RE = re.compile(r"^(?P<building>.+?)(?P<floor>B?\d+F|B\d+|RF)$", re
 
 
 def _split_building_details(remainder: str) -> tuple[str, list[str]]:
-    """拆出棟別與 [樓層, 定址碼, 問題]；同時支援「二門診1F」連寫與舊的空白分隔。"""
+    """拆出棟別與 [樓層, 定址碼, 材料及問題]，相容舊的空白分隔棟別與樓層。"""
     building = next(
         (
             value
@@ -42,17 +45,31 @@ def _split_building_details(remainder: str) -> tuple[str, list[str]]:
         first, *more = rest.split(maxsplit=2)
         return building, [first, *more] if first else []
 
+    joined = remainder.split(maxsplit=2)
+    if len(joined) == 3:
+        matched = FLOOR_SUFFIX_RE.match(joined[0])
+        if matched:
+            return matched.group("building"), [matched.group("floor"), *joined[1:]]
     tokens = remainder.split(maxsplit=3)
     if len(tokens) == 4:
         return tokens[0], tokens[1:]
-    if len(tokens) == 3:
-        matched = FLOOR_SUFFIX_RE.match(tokens[0])
-        if matched:
-            return matched.group("building"), [matched.group("floor"), *tokens[1:]]
     return tokens[0] if tokens else "", []
 
 
-def _case_from_folder(folder: Path) -> CaseCreate | None:
+def folder_reference_values(connection: sqlite3.Connection) -> tuple[set[str], set[str]]:
+    """包含已刪除選項仍被案件使用的值，讓含空白的名稱可正確拆分。"""
+    materials, issues = set(MATERIALS), set(ISSUES)
+    for row in connection.execute("SELECT option_type, value FROM custom_options"):
+        (materials if row["option_type"] == "material" else issues).add(row["value"])
+    for row in connection.execute("SELECT DISTINCT material, issues_json FROM cases"):
+        materials.add(row["material"])
+        issues.add("-".join(json.loads(row["issues_json"])))
+    return materials, issues
+
+
+def _case_from_folder(
+    folder: Path, *, material_names: Iterable[str] = (), issue_names: Iterable[str] = ()
+) -> CaseCreate | None:
     folder_name = folder.name
     if re.match(r"^\d{4}-\d{2}-\d{2}_", folder_name):
         folder_name = folder_name.replace("_", " ")
@@ -69,6 +86,23 @@ def _case_from_folder(folder: Path) -> CaseCreate | None:
         if len(details) != 3:
             return None
         floor, address_code, issue_text = details
+        # 新格式在問題前帶材料；舊格式沒有此欄位，沿用父目錄作為材料。
+        material = folder.parent.name
+        known_materials = {
+            sanitize_component(name) for name in [*MATERIALS, *material_names, material]
+        }
+        known_issues = {sanitize_component(name) for name in [*ISSUES, *issue_names]}
+        known_issues.update(f"火警-{name}" for name in list(known_issues) if name != "火警")
+        if issue_text not in known_issues:
+            for name in sorted(known_materials, key=len, reverse=True):
+                if issue_text.startswith(f"{name} "):
+                    material, issue_text = name, issue_text[len(name) + 1 :]
+                    break
+            else:
+                for name in sorted(known_issues, key=len, reverse=True):
+                    if issue_text.endswith(f" {name}"):
+                        material, issue_text = issue_text[: -len(name) - 1], name
+                        break
         issues = [item for item in issue_text.split("-") if item]
         if not issues:
             return None
@@ -77,7 +111,7 @@ def _case_from_folder(folder: Path) -> CaseCreate | None:
             building=building,
             floor=floor,
             address_code=address_code,
-            material=folder.parent.name,
+            material=material,
             issues=issues,
         )
     except (OSError, ValueError):
@@ -188,6 +222,7 @@ def rescan_case_locations(
         raise StorageError("掃描路徑不存在或不是資料夾")
 
     with connect(database_path) as connection:
+        material_names, issue_names = folder_reference_values(connection)
         cases = connection.execute(
             "SELECT id, storage_root, folder_path FROM cases"
         ).fetchall()
@@ -256,7 +291,11 @@ def rescan_case_locations(
                             if _relink_case(connection, case, root, target, photo_rows):
                                 occupied.add(target.resolve())
                                 refresh_case_from_folder(
-                                    connection, case["id"], target, root, _case_from_folder(target)
+                                    connection, case["id"], target, root,
+                                    _case_from_folder(
+                                        target, material_names=material_names,
+                                        issue_names=issue_names,
+                                    ),
                                 )
                                 relinked += 1
                             else:
@@ -311,7 +350,9 @@ def rescan_case_locations(
             photos = _photos_from_folder(folder)
             if not photos:
                 continue
-            case = _case_from_folder(folder) or _fallback_case_from_folder(folder)
+            case = _case_from_folder(
+                folder, material_names=material_names, issue_names=issue_names
+            ) or _fallback_case_from_folder(folder)
             if case is None:
                 continue
             relative_folder = folder.relative_to(root).as_posix()

@@ -24,7 +24,7 @@ from .db import connect
 from .schemas import CaseCreate
 from .storage.errors import StorageError
 from .storage.naming import SCANNED_PHOTO_RE, role_from_filename, role_rank
-from .storage.rescan import _case_from_folder, _fallback_case_from_folder
+from .storage.rescan import _case_from_folder, _fallback_case_from_folder, folder_reference_values
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 THUMB_SIZE = 360
@@ -129,11 +129,13 @@ def _images_in(folder: Path) -> list[Path]:
 
 
 def collect_from_disk(
-    root: Path, *, material: str = "", building: str = ""
+    root: Path, *, database_path: Path, material: str = "", building: str = ""
 ) -> list[OverviewCase]:
     root = root.resolve()
     if not root.is_dir():
         raise StorageError("掃描路徑不存在或不是資料夾")
+    with connect(database_path) as connection:
+        material_names, issue_names = folder_reference_values(connection)
     cases: list[OverviewCase] = []
     for current, directory_names, _ in os.walk(root, followlinks=False):
         directory_names[:] = sorted(
@@ -146,7 +148,9 @@ def collect_from_disk(
         images = _images_in(folder)
         if not images:
             continue
-        parsed: CaseCreate | None = _case_from_folder(folder)
+        parsed: CaseCreate | None = _case_from_folder(
+            folder, material_names=material_names, issue_names=issue_names
+        )
         if parsed is not None:
             title = case_title(parsed.building, parsed.floor, parsed.address_code, parsed.issues)
             case_building, issues, work_date = parsed.building, parsed.issues, parsed.work_date.isoformat()
@@ -156,7 +160,7 @@ def collect_from_disk(
             case_building = fallback.building if fallback else "未辨識"
             issues = []
             work_date = fallback.work_date.isoformat() if fallback else ""
-        case_material = folder.parent.name
+        case_material = parsed.material if parsed is not None else folder.parent.name
         if (material and case_material != material) or (building and case_building != building):
             continue
         cases.append(

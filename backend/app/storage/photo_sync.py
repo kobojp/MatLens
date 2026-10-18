@@ -124,7 +124,11 @@ def refresh_case_from_folder(
     if not isinstance(parsed, CaseCreate):
         return
     work_date = parsed.work_date.isoformat() if _DATED_NAME_RE.match(folder.name) else None
-    material = folder.parent.name if folder.parent != root and folder.parent.name else None
+    material = (
+        parsed.material
+        if folder.parent != root or parsed.material != folder.parent.name
+        else None
+    )
     connection.execute(
         """
         UPDATE cases SET building = ?, floor = ?, address_code = ?, issues_json = ?,

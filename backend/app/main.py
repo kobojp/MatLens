@@ -462,7 +462,8 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
                 if not target.is_absolute():
                     raise HTTPException(status_code=422, detail="掃描路徑必須使用完整絕對路徑")
                 return collect_from_disk(
-                    target, material=material.strip(), building=building.strip()
+                    target, database_path=app.state.database_path,
+                    material=material.strip(), building=building.strip()
                 )
             return collect_from_database(
                 app.state.database_path, material=material.strip(), building=building.strip()

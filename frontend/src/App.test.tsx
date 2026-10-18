@@ -192,7 +192,7 @@ describe("照片拖放", () => {
     fireEvent.change(screen.getByPlaceholderText("例如 3F、B2"), { target: { value: "1F" } });
     fireEvent.change(screen.getByPlaceholderText("例如 M3-07"), { target: { value: "M3-07" } });
 
-    expect(await screen.findByText(/2026-09-21 二門診1F M3-07 錯誤設備/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/2026-09-21 二門診1F M3-07 底座 錯誤設備/)).length).toBeGreaterThan(0);
   });
 
   it("問題只能單選，選另一項會取代原選項", async () => {
@@ -217,10 +217,10 @@ describe("照片拖放", () => {
     fireEvent.click(screen.getByRole("button", { name: "火警細項 無回應" }));
     fireEvent.change(screen.getByPlaceholderText("例如 3F、B2"), { target: { value: "1F" } });
     fireEvent.change(screen.getByPlaceholderText("例如 M3-07"), { target: { value: "M3-07" } });
-    expect((await screen.findAllByText(/二門診1F M3-07 火警-無回應/)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/二門診1F M3-07 底座 火警-無回應/)).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: "火警細項 無回應" }));
-    expect((await screen.findAllByText(/二門診1F M3-07 火警$/)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/二門診1F M3-07 底座 火警$/)).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: "漏水" }));
     expect(screen.queryByRole("button", { name: "火警細項 無回應" })).not.toBeInTheDocument();
@@ -332,6 +332,42 @@ describe("照片拖放", () => {
 
     const customMaterial = await screen.findByRole("button", { name: "消防泵" });
     expect(customMaterial).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it.each(["month", "free", "free_without_date"])("自訂材料會顯示在案件資料夾預覽（%s）", async (mode) => {
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("維修日期"), { target: { value: "2026-10-06" } });
+    fireEvent.change(screen.getByLabelText("棟別"), { target: { value: "長青" } });
+    fireEvent.change(screen.getByLabelText("樓層"), { target: { value: "3F" } });
+    fireEvent.change(screen.getByLabelText("定址碼"), { target: { value: "M3-07" } });
+    fireEvent.click(screen.getByRole("button", { name: "故障" }));
+    fireEvent.click(screen.getByRole("button", { name: "新增材料選項" }));
+    fireEvent.change(screen.getByLabelText("自訂材料名稱"), { target: { value: "消防泵" } });
+    fireEvent.click(screen.getByRole("button", { name: "加入材料" }));
+    expect(await screen.findByRole("button", { name: "消防泵" })).toHaveAttribute("aria-pressed", "true");
+
+    if (mode !== "month") {
+      const originalFetch = globalThis.fetch;
+      vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => (
+        String(input).includes("settings/storage/scan")
+          ? { ok: true, json: async () => ({ root: "C:\\現場照片", subfolders: ["其他設備"] }) } as Response
+          : originalFetch(input, init)
+      )));
+      fireEvent.click(screen.getByRole("tab", { name: "自由路徑" }));
+      fireEvent.change(screen.getByLabelText("掃描路徑"), { target: { value: "C:\\現場照片" } });
+      fireEvent.click(screen.getByRole("button", { name: "掃描" }));
+      await screen.findByRole("radio", { name: "其他設備" });
+      if (mode === "free_without_date") {
+        fireEvent.click(screen.getByRole("checkbox", { name: "加入今日日期前綴" }));
+      }
+    }
+
+    const name = mode === "free_without_date"
+      ? /\\長青3F M3-07 消防泵 故障$/
+      : /\\2026-10-06 長青3F M3-07 消防泵 故障$/;
+    expect(await screen.findAllByText(name)).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "底座" }));
+    expect(screen.getAllByText(/長青3F M3-07 底座 故障$/)).toHaveLength(2);
   });
 
   it("可刪除自訂材料但不顯示內建材料的刪除鈕", async () => {
