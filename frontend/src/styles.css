@@ -135,6 +135,8 @@ legend { margin-bottom: 7px; color: #5e6d75; font-size: 12px; }
 .list-header p { margin: 5px 0 0; color: #728087; font-size: 12px; }
 .list-filters { display: flex; gap: 8px; }
 .list-filters input { min-width: 230px; }
+.list-filters .database-open { border: 1px solid #526b7a; border-radius: 6px; padding: 7px 10px; color: #fff; background: #526b7a; white-space: nowrap; }
+.list-filters .database-open:hover { border-color: #405765; background: #405765; }
 .list-filters .rescan-cases { border: 1px solid #c6372c; border-radius: 6px; padding: 7px 10px; color: #fff; background: #c6372c; white-space: nowrap; }
 .list-filters .rescan-cases:disabled { cursor: wait; opacity: .6; }
 .case-table-wrap { overflow-x: auto; }
@@ -300,3 +302,4 @@ legend { margin-bottom: 7px; color: #5e6d75; font-size: 12px; }
 .overview-names-mode button { padding: 6px 14px; border: 1px solid #cbd5da; background: #fff; }
 .overview-names-mode button + button { border-left: 0; }
 .overview-names-mode button.active { color: #fff; background: #1f6f5c; border-color: #1f6f5c; }
+.database-location { overflow-wrap: anywhere; color: #52636e; font-size: 13px; }

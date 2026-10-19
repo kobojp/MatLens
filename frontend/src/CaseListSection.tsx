@@ -1,6 +1,8 @@
 import type { CaseRecord } from "./types";
 
 type Props = {
+  databasePath: string;
+  onOpenDatabaseFolder: () => void;
   cases: CaseRecord[];
   buildings: string[];
   materials: string[];
@@ -28,6 +30,7 @@ export default function CaseListSection(props: Props) {
       <div className="list-header">
         <div><span className="eyebrow">ARCHIVE</span><h2>案件清單</h2><p>依棟別、定址碼、材料或問題快速尋找</p></div>
         <div className="list-filters">
+          <button type="button" className="database-open" onClick={props.onOpenDatabaseFolder}>開啟資料庫位置</button>
           <button type="button" className="rescan-cases" onClick={props.onRescan} disabled={scanning}>
             {scanning ? "掃描中…" : "掃描目前資料夾"}
           </button>
@@ -42,6 +45,7 @@ export default function CaseListSection(props: Props) {
           <select value={caseMaterial} onChange={(event) => props.onMaterialChange(event.target.value)} aria-label="依材料篩選"><option value="">全部材料</option>{materials.map((item) => <option key={item}>{item}</option>)}</select>
         </div>
       </div>
+      <p className="database-location">目前資料庫：{props.databasePath || "讀取中…"}</p>
       <div className="case-table-wrap">
         <table className="case-table">
           <thead><tr><th>日期</th><th>位置</th><th>定址碼</th><th>材料／問題</th><th>照片</th><th>狀態</th><th><span className="sr-only">操作</span></th></tr></thead>

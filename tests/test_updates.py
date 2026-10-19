@@ -7,6 +7,7 @@ import sqlite3
 import time
 import zipfile
 from contextlib import closing
+from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -114,14 +115,20 @@ def test_extract_windows_zip(tmp_path):
 
 
 @pytest.mark.parametrize("fail", [False, True])
-def test_swap_and_rollback_preserve_both_versions_and_data(tmp_path, fail):
-    old, new, previous = [tmp_path / name for name in ["MatLens", "next", "previous"]]
+@pytest.mark.parametrize("layout", ["legacy", "installed"])
+def test_swap_and_rollback_preserve_both_versions_and_data(tmp_path, fail, layout):
+    old = tmp_path / ("Programs/MatLens" if layout == "legacy" else "MatLens/app")
+    new, previous = old.with_name("next"), old.with_name("previous")
     for folder, text in [(old, "old"), (new, "new")]:
-        folder.mkdir()
+        folder.mkdir(parents=True)
         (folder / "MatLens.exe").write_text(text)
-    data = tmp_path / "photos"
-    data.mkdir()
+    data = tmp_path / "MatLens/photos"
+    data.mkdir(parents=True)
     (data / "original.jpg").write_bytes(b"original")
+    database = data.parent / "matlens.db"
+    with closing(sqlite3.connect(database)) as connection, connection:
+        connection.execute("CREATE TABLE cases (name TEXT)")
+        connection.execute("INSERT INTO cases VALUES (?)", ("原始案件",))
 
     def start(folder):
         assert (folder / "MatLens.exe").read_text() == "new"
@@ -138,6 +145,8 @@ def test_swap_and_rollback_preserve_both_versions_and_data(tmp_path, fail):
         assert (old / "MatLens.exe").read_text() == "new"
         assert (previous / "MatLens.exe").read_text() == "old"
     assert (data / "original.jpg").read_bytes() == b"original"
+    with closing(sqlite3.connect(database)) as connection:
+        assert connection.execute("SELECT name FROM cases").fetchone()[0] == "原始案件"
 
 
 def test_real_sqlite_wal_backup_preserves_original(tmp_path):
@@ -271,3 +280,100 @@ def test_new_app_sees_result_written_after_startup_and_after_restart(tmp_path):
     report.write_text(json.dumps({"ok": True, "message": "已更新至 0.3.0。"}), "utf-8")
     assert service.status()["last_result"]["ok"]
     assert UpdateService(tmp_path).status()["last_result"]["message"] == "已更新至 0.3.0。"
+
+
+def test_old_app_does_not_claim_new_version_is_running(tmp_path):
+    report = tmp_path / "updates" / "last-result.json"
+    report.parent.mkdir()
+    report.write_text(json.dumps({"ok": True, "version": NEWER_VERSION,
+                                  "message": f"已更新至 {NEWER_VERSION}。"}), "utf-8")
+    result = UpdateService(tmp_path).status()["last_result"]
+    assert not result["ok"]
+    assert "仍在執行" in result["message"]
+
+
+@pytest.mark.parametrize("layout", ["MatLens/app", "Programs/MatLens"])
+def test_both_installed_layouts_support_updates(tmp_path, monkeypatch, layout):
+    import sys
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.delenv("MATLENS_DESKTOP_DATA_DIR", raising=False)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / layout / "MatLens.exe"))
+    service = UpdateService(tmp_path / "MatLens")
+    assert service.status()["installable"]
+
+
+def test_pending_update_is_not_hidden_by_an_older_success_report(tmp_path):
+    updates = tmp_path / "updates"
+    updates.mkdir()
+    (updates / "last-result.json").write_text(json.dumps({"ok": True, "version": "0.3.0",
+                                                        "message": "上次成功"}), "utf-8")
+    (updates / "pending.json").write_text(json.dumps({"job_id": "new-job",
+                                                    "version": NEWER_VERSION}), "utf-8")
+    service = UpdateService(tmp_path)
+    assert not service.status()["last_result"]["ok"]
+    assert NEWER_VERSION in service.status()["last_result"]["message"]
+    (updates / "last-result.json").write_text(json.dumps({"ok": False, "job_id": "new-job",
+                                                        "message": "新版預先測試失敗"}), "utf-8")
+    assert service.status()["last_result"]["message"] == "新版預先測試失敗"
+
+
+def test_newer_installer_does_not_misreport_historical_update_as_failure(tmp_path):
+    report = tmp_path / "updates/last-result.json"
+    report.parent.mkdir()
+    report.write_text(json.dumps({"ok": True, "version": "0.3.0", "target": "old-install",
+                                  "message": "已更新至 0.3.0。"}), "utf-8")
+    assert UpdateService(tmp_path).status()["last_result"]["ok"]
+
+
+def test_worker_rejects_unknown_installation_before_modifying_files(tmp_path, monkeypatch):
+    from desktop.updater import apply_update
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.delenv("MATLENS_DESKTOP_DATA_DIR", raising=False)
+    original = tmp_path / "unrelated" / "MatLens.exe"
+    original.parent.mkdir()
+    original.write_bytes(b"untouched")
+    job = tmp_path / "MatLens/updates" / ("a" * 32) / "job.json"
+    job.parent.mkdir(parents=True)
+    job.write_text(json.dumps({"target": str(original.parent)}), "utf-8")
+    with pytest.raises(ValueError, match="安裝位置"):
+        apply_update(job)
+    assert original.read_bytes() == b"untouched"
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_install_handoff_records_actual_target_and_pending_version(tmp_path, monkeypatch, fail):
+    import sys
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.delenv("MATLENS_DESKTOP_DATA_DIR", raising=False)
+    target = tmp_path / "MatLens/app"
+    target.mkdir(parents=True)
+    (target / "MatLensUpdater.exe").write_bytes(b"test-helper")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(target / "MatLens.exe"))
+    service = UpdateService(tmp_path / "MatLens")
+    raw, public = signed_manifest()
+    service._manifest = verify_manifest(raw, public, "stable")
+    service._job_dir = tmp_path / "MatLens/updates" / ("a" * 32)
+    service._job_dir.mkdir(parents=True)
+    (service._job_dir / "package.zip").write_bytes(b"abc")
+    service._set(phase="ready")
+
+    def start(args, **kwargs):
+        assert Path(args[0]).read_bytes() == b"test-helper"
+        if fail:
+            raise OSError("Cannot launch")
+
+    monkeypatch.setattr("desktop.updates.subprocess.Popen", start)
+    result = service.launch_installer()
+    assert ("error" in result) == fail
+    job = json.loads((service._job_dir / "job.json").read_text("utf-8"))
+    assert Path(job["target"]) == target
+    pending = tmp_path / "MatLens/updates/pending.json"
+    if fail:
+        assert not pending.exists()
+    else:
+        assert json.loads(pending.read_text("utf-8"))["version"] == NEWER_VERSION

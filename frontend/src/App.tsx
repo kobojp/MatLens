@@ -28,6 +28,7 @@ import {
 } from "./utils";
 
 export default function App() {
+  const [databasePath, setDatabasePath] = useState("");
   const [references, setReferences] = useState(FALLBACK_REFERENCES);
   const [photos, setPhotos] = useState<PhotoDraft[]>([]);
   const [selectedPhotoId, setSelectedPhotoId] = useState("");
@@ -209,6 +210,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    fetch("/api/settings/database")
+      .then((response) => response.ok ? response.json() : Promise.reject())
+      .then((payload: { path: string }) => setDatabasePath(payload.path || ""))
+      .catch(() => setError("無法取得目前資料庫位置，請重新整理。"));
     fetch("/api/reference-values")
       .then((response) => (response.ok ? response.json() : Promise.reject()))
       .then((payload: ReferenceValues) => setReferences((current) => ({
@@ -410,6 +415,15 @@ export default function App() {
   async function openFolder(id: string) {
     const response = await fetch(`/api/cases/${id}/open-folder`, { method: "POST" });
     if (!response.ok) setError("無法開啟案件資料夾。");
+  }
+
+  async function openDatabaseFolder() {
+    try {
+      const response = await fetch("/api/settings/database/open-folder", { method: "POST" });
+      if (!response.ok) throw new Error(errorText(await response.json()));
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "無法開啟資料庫位置。");
+    }
   }
 
   function currentScanPath(): string {
@@ -955,6 +969,8 @@ export default function App() {
         </form>
 
         <CaseListSection
+          databasePath={databasePath}
+          onOpenDatabaseFolder={openDatabaseFolder}
           cases={cases}
           buildings={references.buildings}
           materials={references.materials}

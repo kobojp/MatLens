@@ -86,6 +86,23 @@ def create_app(
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/api/settings/database")
+    def database_location() -> dict[str, str]:
+        return {"path": str(app.state.database_path.resolve())}
+
+    @app.post("/api/settings/database/open-folder", status_code=204)
+    def open_database_location() -> Response:
+        target = app.state.database_path.resolve()
+        if not target.is_file():
+            raise HTTPException(status_code=404, detail="找不到目前使用的資料庫")
+        try:
+            subprocess.Popen(["explorer.exe", f"/select,{target}"])
+        except OSError as error:
+            raise HTTPException(
+                status_code=400, detail="無法開啟資料庫位置，請依顯示的路徑開啟"
+            ) from error
+        return Response(status_code=204)
+
     @app.get("/api/reference-values")
     def reference_values() -> dict[str, list[str]]:
         with connect(app.state.database_path) as connection:

@@ -1,0 +1,3 @@
+interface:
+  display_name: "MatLens 發佈"
+  short_description: "建立 Windows 安裝包、簽署更新並驗證 MatLens 的 GitHub 發佈"

@@ -29,11 +29,14 @@ def main():
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--helper", type=Path, help="Test-only frozen 0.3.0 updater")
+    parser.add_argument("--helper-version-simulated", action="store_true",
+                        help="The supplied QA helper has a simulated baseline version")
+    parser.add_argument("--layout", choices=["legacy", "installed"], default="legacy")
     args = parser.parse_args()
     root = Path(tempfile.mkdtemp(prefix="matlens-update-qa-"))
     os.environ["LOCALAPPDATA"] = str(root)
     os.environ.pop("MATLENS_DESKTOP_DATA_DIR", None)
-    target = root / "Programs" / "MatLens"
+    target = root / ("Programs/MatLens" if args.layout == "legacy" else "MatLens/app")
     target.mkdir(parents=True)
     (target / "MatLens.exe").write_bytes(b"old-program-sentinel")
     data = root / "MatLens"
@@ -52,7 +55,10 @@ def main():
                               creationflags=subprocess.CREATE_NO_WINDOW)
     parent.wait(timeout=10)
     job = work / "job.json"
-    job.write_text(json.dumps({"parent_pid": parent.pid, "channel": "stable"}), "utf-8")
+    params = {"parent_pid": parent.pid, "channel": "stable"}
+    if args.layout == "installed":
+        params["target"] = str(target)
+    job.write_text(json.dumps(params), "utf-8")
     # Baseline updater version is the sole compatibility simulation.
     updater.VERSION = "0.2.0"
     launched = []
@@ -79,7 +85,10 @@ def main():
         assert original.read_bytes() == b"original-must-not-change"
         assert (Path(result["previous"]) / "MatLens.exe").read_bytes() == b"old-program-sentinel"
         result.update(sqlite_preserved=True, photos_preserved=True, backup_verified=True,
-                      startup_verified=True, old_worker_version_simulated=True, test_root=str(root),
+                      startup_verified=True,
+                      old_worker_version_simulated=not bool(args.helper)
+                      or args.helper_version_simulated,
+                      layout=args.layout, test_root=str(root),
                       frozen_worker=bool(args.helper))
         args.report.write_text(json.dumps(result, ensure_ascii=False, indent=2), "utf-8")
         print(json.dumps(result, ensure_ascii=False))

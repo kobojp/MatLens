@@ -14,6 +14,7 @@ from contextlib import closing
 from pathlib import Path
 
 from desktop.data import resource_root, user_data_dir
+from desktop.installation import program_directories, validate_program_directory
 from desktop.update_core import extract_package, verify_manifest, verify_package, version_key
 from desktop.version import VERSION
 
@@ -68,7 +69,10 @@ def start_and_check(target: Path, report: Path, version: str):
         while time.monotonic() < deadline:
             if report.exists():
                 result = json.loads(report.read_text(encoding="utf-8"))
-                if result.get("ok") and result.get("version") == version:
+                if (result.get("ok") and result.get("version") == version
+                        and result.get("pid") == process.pid
+                        and Path(result.get("executable", "")).resolve()
+                        == (target / "MatLens.exe").resolve()):
                     return
                 break
             if process.poll() is not None:
@@ -91,14 +95,15 @@ def apply_update(job: Path):
             or any(c not in "0123456789abcdef" for c in work.name)
             or job.name != "job.json"):
         raise ValueError("更新工作目錄不正確。")
-    target = Path(os.environ["LOCALAPPDATA"]) / "Programs" / "MatLens"
+    params = json.loads(job.read_text(encoding="utf-8"))
+    # Older apps omit target and always live in the legacy location.
+    target = validate_program_directory(Path(params.get("target", program_directories()[1])))
     # Reject junctions/symlinks: never rename a redirected installation or user data.
     if target.resolve() != target.absolute() or not (target / "MatLens.exe").is_file():
         raise ValueError("安裝位置不正確，停止更新。")
     allowed = {"matlens.exe", "matlensupdater.exe", "_internal"}
     if any(child.name.lower() not in allowed for child in target.iterdir()):
         raise ValueError("安裝目錄含非程式檔案，為保護資料已停止自動更新。")
-    params = json.loads(job.read_text(encoding="utf-8"))
     pid = params["parent_pid"]
     if type(pid) is not int or pid <= 0 or pid == os.getpid():
         raise ValueError("主程式識別碼不正確。")
@@ -127,13 +132,13 @@ def apply_update(job: Path):
         if not probe_result.get("ok") or probe_result.get("version") != manifest["version"]:
             raise RuntimeError("新版預先測試失敗，未替換程式。")
         suffix = uuid.uuid4().hex
-        prepared = target.with_name(f"MatLens.next-{suffix}")
-        previous = target.with_name(f"MatLens.previous-{suffix}")
+        prepared = target.with_name(f"{target.name}.next-{suffix}")
+        previous = target.with_name(f"{target.name}.previous-{suffix}")
         if prepared.resolve().parent != target.resolve().parent:
             raise ValueError("暫存安裝位置不正確。")
         shutil.copytree(unpacked, prepared)
         journal = {"target": str(target), "previous": str(previous), "prepared": str(prepared),
-                   "backup": str(backup), "version": manifest["version"]}
+                   "backup": str(backup), "version": manifest["version"], "job_id": work.name}
         (work / "recovery.json").write_text(json.dumps(journal), encoding="utf-8")
     finally:
         guard.close()
@@ -156,7 +161,8 @@ def main() -> int:
         try:
             result = apply_update(Path(sys.argv[1]))
         except Exception as error:
-            result = {"ok": False, "message": str(error)}
+            result = {"ok": False, "message": str(error),
+                      "job_id": Path(sys.argv[1]).parent.name if len(sys.argv) > 1 else ""}
         report = updates / "last-result.json"
         staged_report = updates / "last-result.tmp"
         staged_report.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

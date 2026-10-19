@@ -74,3 +74,14 @@ it("可攜版不允許下載安裝，離線錯誤仍可重新檢查", async () =
   expect(await screen.findByRole("alert")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "檢查更新" })).toBeEnabled();
 });
+
+it("顯示實際執行位置與尚未生效的更新，方便辨識舊捷徑", async () => {
+  window.pywebview!.api.update_status = vi.fn(async () => ({ ...available,
+    executable: "C:\\Old\\MatLens.exe", database: "C:\\MatLens\\matlens.db",
+    installation_mode: "legacy", last_result: { ok: false, message: "仍在執行 0.3.0" } }));
+  render(<UpdatePanel />);
+  fireEvent.click(await screen.findByRole("button", { name: /關於與更新/ }));
+  expect(screen.getByText("程式位置：C:\\Old\\MatLens.exe")).toBeInTheDocument();
+  expect(screen.getByText("執行方式：舊路徑安裝")).toBeInTheDocument();
+  expect(screen.getByRole("alert")).toHaveTextContent("仍在執行 0.3.0");
+});

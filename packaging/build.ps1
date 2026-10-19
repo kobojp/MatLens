@@ -1,4 +1,4 @@
-param([switch]$Installer)
+param([switch]$Installer, [string]$CompilerPath = $env:MATLENS_ISCC_PATH)
 $ErrorActionPreference = "Stop"
 Set-Location -LiteralPath (Split-Path -Parent $PSScriptRoot)
 uv sync --locked
@@ -19,8 +19,11 @@ Compress-Archive -Path dist/MatLens,dist/install.ps1,dist/Install-MatLens.cmd -D
 Compress-Archive -Path dist/MatLens -DestinationPath "dist/MatLens-$version-update-win-x64.zip" -Force
 if ($Installer) {
     $compiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-    $compilerPath = if ($compiler) { $compiler.Source } else { "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+    if (-not $CompilerPath) {
+        $CompilerPath = if ($compiler) { $compiler.Source } else { "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+    }
     if (-not (Test-Path -LiteralPath $compilerPath)) { throw "請安裝 Inno Setup 6 後重試 -Installer" }
     & $compilerPath packaging/MatLens.iss
     if ($LASTEXITCODE -ne 0) { throw "Installer build failed" }
+    Copy-Item -LiteralPath "dist/installer/MatLens-Setup-$version-x64.exe" -Destination dist -Force
 }

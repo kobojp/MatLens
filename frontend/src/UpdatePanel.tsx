@@ -9,6 +9,9 @@ export type UpdateState = {
   version: string;
   notes: string;
   installable: boolean;
+  executable?: string;
+  database?: string;
+  installation_mode?: string;
   last_result?: { ok: boolean; message: string };
 };
 
@@ -94,6 +97,9 @@ export default function UpdatePanel({ onInstalling }: { onInstalling?: (value: b
         <div className="update-panel">
           <h2>程式更新</h2>
           <p>目前版本 {state.current}{state.version ? ` ／ 線上版本 ${state.version}` : ""}</p>
+          {state.installation_mode && <p>執行方式：{({ installed: "正式安裝", legacy: "舊路徑安裝", portable: "可攜版", development: "開發版" } as Record<string, string>)[state.installation_mode] || state.installation_mode}</p>}
+          {state.executable && <p className="database-location">程式位置：{state.executable}</p>}
+          {state.database && <p className="database-location">資料庫：{state.database}</p>}
           <label>更新頻道
             <select aria-label="更新頻道" value={channel} disabled={busy || installing}
               onChange={(event) => setChannel(event.target.value)}>
@@ -105,13 +111,13 @@ export default function UpdatePanel({ onInstalling }: { onInstalling?: (value: b
           <p role="status">{state.message}</p>
           {state.notes && <pre className="update-notes">{state.notes}</pre>}
           {state.phase === "downloading" && <progress aria-label="更新下載進度" value={state.progress} max={100} />}
-          {!state.installable && <p>目前為開發版或可攜版。請執行 Install-MatLens.cmd 安裝後使用自動更新。</p>}
+          {!state.installable && <p>目前為開發版或可攜版。請使用 MatLens 安裝精靈安裝後使用自動更新。</p>}
           {state.phase === "available" && <button type="button" disabled={!state.installable}
             onClick={() => action("download")}>下載更新</button>}
           {state.phase === "ready" && <button type="button" disabled={installing}
             onClick={() => action("install")}>安裝並重新啟動</button>}
           {error && <p role="alert">{error}</p>}
-          {state.last_result && <p>上次更新：{state.last_result.message}</p>}
+          {state.last_result && <p role={state.last_result.ok ? undefined : "alert"}>上次更新：{state.last_result.message}</p>}
           <p>更新不會上傳或移動照片；安裝前會備份案件資料庫。</p>
         </div>
       )}

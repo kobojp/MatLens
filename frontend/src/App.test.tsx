@@ -47,6 +47,25 @@ describe("照片拖放", () => {
     vi.unstubAllGlobals();
   });
 
+  it("清冊顯示目前資料庫並可開啟位置，失敗時顯示原因", async () => {
+    const originalFetch = window.fetch;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/settings/database") {
+        return { ok: true, json: async () => ({ path: "C:\\MatLens\\matlens.db" }) } as Response;
+      }
+      if (String(input) === "/api/settings/database/open-folder") {
+        return { ok: false, json: async () => ({ detail: "無法開啟資料庫位置" }) } as Response;
+      }
+      return originalFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await screen.findByText("目前資料庫：C:\\MatLens\\matlens.db");
+    fireEvent.click(screen.getByRole("button", { name: "開啟資料庫位置" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/settings/database/open-folder", { method: "POST" }));
+    expect(await screen.findByText("無法開啟資料庫位置")).toBeInTheDocument();
+  });
+
   it("已有一張照片時仍可拖入第二張", async () => {
     render(<App />);
     const section = screen.getByRole("region", { name: "本次照片" });

@@ -1,6 +1,8 @@
 // Synthetic photos only: used by the isolated --self-test desktop mode.
 (async () => {
+  window.matlensSmokeStep = 'start';
   const wait = async (check, label) => {
+    window.matlensSmokeStep = label;
     for (let i = 0; i < 100; i++) {
       if (await check()) return;
       await new Promise(resolve => setTimeout(resolve, 50));
@@ -13,6 +15,7 @@
     input.dispatchEvent(new Event('input', { bubbles: true }));
   };
   const drop = async (color, name) => {
+    window.matlensSmokeStep = `canvas blob: ${name}`;
     const canvas = document.createElement('canvas');
     canvas.width = 800;
     canvas.height = 1600;
@@ -75,7 +78,10 @@
       await wait(() => document.querySelector('select[aria-label="更新頻道"]'), 'update channel');
       update_panel = document.querySelector('select[aria-label="更新頻道"]').value === 'stable';
     }
-    return { ok: true, photos: 3, address: 'DESKTOP-QA', dirty: window.matlensDesktopState.dirty, portrait_fit: true, zoom_pan: true, update_panel };
+    const database = await (await fetch('/api/settings/database')).json();
+    await wait(() => document.querySelector('.case-list-section .database-location')?.textContent.includes(database.path), 'active database path');
+    if (![...document.querySelectorAll('button')].some(button => button.textContent === '開啟資料庫位置')) throw new Error('Missing database location button');
+    return { ok: true, photos: 3, address: 'DESKTOP-QA', dirty: window.matlensDesktopState.dirty, portrait_fit: true, zoom_pan: true, update_panel, database_location: true };
   } catch (error) {
     return { ok: false, error: String(error), text: document.body.innerText };
   }

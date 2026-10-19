@@ -66,6 +66,29 @@ def test_health_and_reference_values(client: TestClient) -> None:
     assert references["photo_roles"][:4] == ["前", "中", "後", "完成"]
 
 
+def test_database_location_uses_active_database_and_survives_restart(tmp_path, monkeypatch):
+    database = tmp_path / "different-database" / "active.db"
+    app = create_app(database_path=database, photo_root=tmp_path / "photos")
+    client = TestClient(app)
+    calls = []
+    monkeypatch.setattr("backend.app.main.subprocess.Popen", lambda args: calls.append(args))
+    assert client.get("/api/settings/database").json() == {"path": str(database.resolve())}
+    assert client.post("/api/settings/database/open-folder").status_code == 204
+    assert calls == [["explorer.exe", f"/select,{database.resolve()}"]]
+    reopened = TestClient(create_app(database_path=database, photo_root=tmp_path / "photos"))
+    assert reopened.get("/api/settings/database").json()["path"] == str(database.resolve())
+
+
+def test_database_open_failure_is_readable(client, monkeypatch):
+    def fail(args):
+        raise OSError("Explorer unavailable")
+
+    monkeypatch.setattr("backend.app.main.subprocess.Popen", fail)
+    response = client.post("/api/settings/database/open-folder")
+    assert response.status_code == 400
+    assert "無法開啟" in response.json()["detail"]
+
+
 def test_create_list_and_read_case(client: TestClient, tmp_path: Path) -> None:
     (tmp_path / "photos" / "8月" / "底座").mkdir(parents=True)
     response = create_case(client, [(180, 20, 20), (20, 180, 20), (20, 20, 180)])

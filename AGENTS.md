@@ -12,7 +12,7 @@ MatLens 是供 Windows 10／11 使用的消防材料更換照片整理與案件�
 
 - 原始碼倉庫：公開 `https://github.com/kobojp/MatLens`。
 - Windows 安裝包與線上更新檔：同一倉庫的 GitHub Releases。
-- 目前正式版本：`v0.5.4`；版本唯一來源為 `desktop/version.py`。
+- 目前正式版本：`v0.5.4`；開發中版本：`0.5.5`；版本唯一來源為 `desktop/version.py`。
 - 舊倉庫 `kobojp/MatLens-Releases` 已於 2026-10-05 刪除，不再有過渡入口。
   仍停在 v0.3.0 的安裝無法自動更新，需手動安裝新版完整 ZIP 一次。
 - 所有更新檔只放在 `kobojp/MatLens` 的 GitHub Releases。
@@ -68,7 +68,8 @@ MatLens/
   有多個候選或資料庫唯一性衝突時略過並回報，不得猜測。
 - 內建材料與問題選項受到保護，不可由一般刪除功能移除。
 - 任何具破壞性的資料操作都必須先確認精確目標與使用者授權。
-- 桌面資料庫位於 `%LOCALAPPDATA%/MatLens/`，必須與安裝檔案分離。
+- 桌面資料庫位於 `%LOCALAPPDATA%/MatLens/matlens.db`；程式位於同一根目錄的 `app/`，
+  必須保持子目錄分離，更新只替換 `app/`。舊 `%LOCALAPPDATA%/Programs/MatLens` 仍可更新。
 - 接續舊資料前使用 SQLite backup 建立一致性快照，不覆蓋已有桌面資料庫。
 - 桌面版與舊網頁版使用獨立資料庫，不能假設兩者自動同步。
 - 桌面內部服務僅綁定 loopback 隨機埠，保留 session cookie、Host 與 Origin 檢查。
@@ -129,6 +130,9 @@ npm --prefix frontend run build
 PowerShell -ExecutionPolicy Bypass -File .\packaging\build.ps1
 ```
 
+0.5.5 起主要交付安裝精靈，建置加上 `-Installer`；以 `-CompilerPath` 或
+`MATLENS_ISCC_PATH` 指定 Inno Setup。隔離安裝驗證使用 `tests.run_installer_smoke`。
+
 ## 開發流程
 
 1. 先理解需求與目前行為，檢查相關程式和既有資料結構。
@@ -142,12 +146,15 @@ PowerShell -ExecutionPolicy Bypass -File .\packaging\build.ps1
 
 ## 版本與線上更新規則
 
+- 發布安裝包、發布新版或檢查發佈流程時，先讀取專案技能
+  [matlens-release](.agents/skills/matlens-release/SKILL.md)；單純推送 Git 不觸發發版。
 - 修改版本時，先改 `desktop/version.py`，並同步 `pyproject.toml`、`uv.lock` 與
   `packaging/MatLens.iss`；檔名與 Release tag 必須一致。
 - 正式版使用 `x.y.z`；測試版可使用 `x.y.z-rc.n`，不得把測試版放進正式頻道。
 - `desktop/update-source.json` 的正式更新網址必須指向
   `kobojp/MatLens/releases/latest/download/stable.json`。
-- 每個正式 Release 必須包含完整安裝 ZIP、更新專用 ZIP 與 `stable.json`。
+- 每個正式 Release 必須包含完整安裝 ZIP、更新專用 ZIP 與 `stable.json`；
+  0.5.5 起另外包含主要安裝精靈 `MatLens-Setup-<版本>-x64.exe`。
 - 更新 manifest 必須使用既有 Ed25519 私鑰簽署；私鑰位於 repository 之外，
   不得重新產生後直接取代內建公鑰，也不得加入 Git、Release 或紀錄輸出。
 - 發佈前先建立 draft Release，核對 tag、目標 commit、資產名稱、大小與 SHA-256，

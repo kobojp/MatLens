@@ -129,9 +129,9 @@ def main() -> int:
                                 "document.querySelector('h1')?.textContent === 'MatLens'"
                             ):
                                 staged = args.startup_report.with_suffix(".tmp")
-                                staged.write_text(json.dumps({"ok": True, "version": VERSION,
-                                                              "pid": os.getpid()}),
-                                                  encoding="utf-8")
+                                startup = {"ok": True, "version": VERSION, "pid": os.getpid(),
+                                           "executable": str(Path(sys.executable).resolve())}
+                                staged.write_text(json.dumps(startup), encoding="utf-8")
                                 staged.replace(args.startup_report)
                                 window.show()
                                 return

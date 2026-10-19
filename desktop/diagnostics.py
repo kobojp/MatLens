@@ -16,7 +16,11 @@ def exercise_window(window, draft, result: dict, finished: threading.Event) -> N
         script = (resource_root() / "desktop" / "smoke.js").read_text(encoding="utf-8")
         window.evaluate_js(script, callback=callback)
         if not finished.wait(40):
-            result.update(ok=False, error="WebView2 flow timed out")
+            snapshot = window.evaluate_js(
+                "({step: window.matlensSmokeStep, visibility: document.visibilityState, "
+                "thumbnails: document.querySelectorAll('.thumbnail-item').length})"
+            )
+            result.update(ok=False, error="WebView2 flow timed out", snapshot=snapshot)
     except Exception as error:
         result.update(ok=False, error=str(error))
     finally:
