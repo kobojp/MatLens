@@ -3,7 +3,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import sqlite3
+import subprocess
 import time
 import zipfile
 from contextlib import closing
@@ -377,3 +379,66 @@ def test_install_handoff_records_actual_target_and_pending_version(tmp_path, mon
         assert not pending.exists()
     else:
         assert json.loads(pending.read_text("utf-8"))["version"] == NEWER_VERSION
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows update worker and instance mutex")
+@pytest.mark.parametrize("layout", ["legacy", "installed"])
+@pytest.mark.parametrize("failure", ["exit", "timeout", "report"])
+def test_failed_preflight_keeps_program_database_and_photos(tmp_path, monkeypatch, layout, failure):
+    from backend.app.db import initialize
+    from desktop.updater import apply_update
+
+    local = tmp_path / "Local"
+    data = local / "MatLens"
+    target = local / ("Programs/MatLens" if layout == "legacy" else "MatLens/app")
+    target.mkdir(parents=True)
+    (target / "MatLens.exe").write_bytes(b"original-program")
+    initialize(data / "matlens.db")
+    with closing(sqlite3.connect(data / "matlens.db")) as db, db:
+        db.execute("INSERT INTO custom_options VALUES (?, ?, ?, ?)",
+                   (1, "material", "原始清冊", "2026-10-19"))
+    database_bytes = (data / "matlens.db").read_bytes()
+    photo = data / "photos/original.jpg"
+    photo.parent.mkdir()
+    photo.write_bytes(b"original-photo")
+    work = data / "updates" / ("a" * 32)
+    work.mkdir(parents=True)
+    package = work / "package.zip"
+    zip_package(package)
+    raw, public = signed_manifest(size=package.stat().st_size,
+                                  sha256=hashlib.sha256(package.read_bytes()).hexdigest())
+    (work / "manifest.json").write_bytes(raw)
+    resources = tmp_path / "resources"
+    (resources / "desktop").mkdir(parents=True)
+    (resources / "desktop/update-source.json").write_text(
+        json.dumps({"public_key": public}), "utf-8")
+    job = work / "job.json"
+    job.write_text(json.dumps({"parent_pid": os.getpid() + 100000, "channel": "stable",
+                               "target": str(target)}), "utf-8")
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    monkeypatch.delenv("MATLENS_DESKTOP_DATA_DIR", raising=False)
+    monkeypatch.setattr("desktop.updater.resource_root", lambda: resources)
+    monkeypatch.setattr("desktop.updater.wait_for_parent", lambda pid: None)
+
+    def failed_probe(command, **kwargs):
+        assert "--self-test" in command
+        if failure == "exit":
+            raise subprocess.CalledProcessError(1, command)
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+        (work / "probe.json").write_text(json.dumps({"ok": False, "version": NEWER_VERSION,
+                                                   "error": "WebView2 flow timed out"}), "utf-8")
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr("desktop.updater.subprocess.run", failed_probe)
+    with pytest.raises((subprocess.CalledProcessError, subprocess.TimeoutExpired, RuntimeError)):
+        apply_update(job)
+    assert (target / "MatLens.exe").read_bytes() == b"original-program"
+    assert (data / "matlens.db").read_bytes() == database_bytes
+    assert photo.read_bytes() == b"original-photo"
+    assert not list(target.parent.glob(target.name + ".previous-*"))
+    assert not list(target.parent.glob(target.name + ".next-*"))
+    assert not (work / "recovery.json").exists()
+    with closing(sqlite3.connect(data / "backups" / f"before-update-{work.name}.db")) as backup:
+        assert backup.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert backup.execute("SELECT value FROM custom_options").fetchone()[0] == "原始清冊"

@@ -12,7 +12,7 @@ MatLens 是供 Windows 10／11 使用的消防材料更換照片整理與案件�
 
 - 原始碼倉庫：公開 `https://github.com/kobojp/MatLens`。
 - Windows 安裝包與線上更新檔：同一倉庫的 GitHub Releases。
-- 目前正式版本：`v0.5.4`；開發中版本：`0.5.5`；版本唯一來源為 `desktop/version.py`。
+- 目前正式版本：`v0.5.5`；版本唯一來源為 `desktop/version.py`。
 - 舊倉庫 `kobojp/MatLens-Releases` 已於 2026-10-05 刪除，不再有過渡入口。
   仍停在 v0.3.0 的安裝無法自動更新，需手動安裝新版完整 ZIP 一次。
 - 所有更新檔只放在 `kobojp/MatLens` 的 GitHub Releases。
