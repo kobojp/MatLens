@@ -1,6 +1,6 @@
 # 0.5.6 本機實作與驗證
 
-日期：2026-11-08。正式公開版本仍為 0.5.5；0.5.6 本輪交付原始碼至 GitHub；安裝包與線上更新尚未發布。
+日期：2026-11-08。0.5.6 的來源、安裝包及更新驗證紀錄；公開狀態與附件以 GitHub Release 為準。
 
 ## 實作位置
 
@@ -55,7 +55,7 @@ uv run --locked python -m tests.run_client_update_smoke --qa-client <QA-MatLens-
 
 來源、打包 EXE 與安裝後 EXE 通過新版圖塊、放大看圖、長檔名、三種配置、重設、收合及持久化測試。
 0.5.4 舊位置與 0.5.5 新位置的完整舊介面交接原版更新器至本機 0.5.6 均通過，重啟與 startup.log 已核對；
-本輪使用本機傳輸，沒有公開 0.5.6。打包更新器的受控預先測試失敗保留 log、程式、照片與 SQLite 備份。
+升級測試使用本機傳輸；正式發布後另從正常公開網址下載驗證。打包更新器的受控預先測試失敗保留 log、程式、照片與 SQLite 備份。
 主專案 run-desktop.ps1 重建前端及隔離桌面自測通過；Setup／完整 ZIP／更新 ZIP 與原始碼已同步並核對。
 最終報告分別為本機 build 中的 source／exe／installer-workspace-complete、client-v0.5.4／v0.5.5-workspace-complete、
 workspace-update-failure-complete，以及主專案 main-workspace-complete；原始報告不提交。
