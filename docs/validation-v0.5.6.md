@@ -67,3 +67,19 @@ workspace-update-failure-complete，以及主專案 main-workspace-complete；�
 窄視窗與長路徑已補入三種配置的實際 WebView2 自測；新版外觀已提供桌面截圖，仍可依使用者回饋微調。
 
 開發啟動使用 `run-desktop.ps1`，會同步 uv、重建前端後開啟本輪程式。安裝測試使用本機 `dist/MatLens-Setup-0.5.6-x64.exe` 按「下一步」。
+
+
+## 正式公開下載驗證
+
+2026-11-08，[v0.5.6](https://github.com/kobojp/MatLens/releases/tag/v0.5.6) 正式發布並設為 latest。
+草稿四個附件的名稱、大小與 SHA-256 全部相符，tag 精確對應 ba1c7eb6c2957bb221669c1c4b41bdeef3ba3a4f。
+公開後從未登入、沒有 query 的正常 latest/download 網址下載 manifest、安裝精靈、完整 ZIP 與更新 ZIP，
+全部與本機一致，Ed25519 簽章及更新包雜湊驗證通過；正常 UpdateService 檢查讀到 0.5.6。
+原始證據留在忽略的 build/release-v0.5.6-public.json 及其報告目錄。
+
+
+另外以已驗證的舊版封存原始碼、公開前端與原版更新器建立的 QA 客戶端，保留原版 HTTPS 傳輸，
+從完整介面實際檢查、下載公開更新包、安裝並重新啟動：0.5.4 → 0.5.6（舊路徑）與
+0.5.5 → 0.5.6（新路徑）均通過。核對同一工作 startup.ready、0.5.6 執行版本與位置、
+原案件、照片 SHA-256 及 SQLite 備份。原始報告為本機 public-v0.5.4-to-v0.5.6.json 與
+public-v0.5.5-to-v0.5.6.json；這是本機隔離測試，UPD-001 仍待出問題的電腦驗收。

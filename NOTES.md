@@ -108,3 +108,13 @@ UI 偏好存於既有 SQLite settings 的 `ui_preferences`，只包含 `layout`�
 關閉還原焦點，換圖回到完整顯示。詳見 [UI 驗證](docs/ui-workspace-validation.md)。
 
 實作階段使用本機 0.5.6；正式安裝及更新依發布流程交付。跨電腦更新 UPD-001 與 LINE／瀏覽器實際剪貼簿驗收繼續追蹤。
+
+
+## 2026-11-08 正式發布 0.5.6
+
+[GitHub Release v0.5.6](https://github.com/kobojp/MatLens/releases/tag/v0.5.6) 已公開並設為 latest，
+包含安裝精靈、完整安裝 ZIP、更新 ZIP 與既有 Ed25519 私鑰簽署的 stable.json。
+從未登入的正常 latest/download 網址實際下載四個附件，核對簽章、大小與 SHA-256，
+程式正常更新檢查讀到 0.5.6。發布 tag 指向 ba1c7eb6c2957bb221669c1c4b41bdeef3ba3a4f。
+
+發布後另以原版 HTTPS 傳輸完成 0.5.4／0.5.5 QA 客戶端升級到公開 0.5.6；核對重啟與資料保留，UPD-001 仍待該機驗收。
