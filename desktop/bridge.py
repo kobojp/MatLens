@@ -34,6 +34,17 @@ class DesktopBridge(DraftState):
     def download_update(self):
         return self._updates.fetch_package()
 
+    def read_clipboard_images(self):
+        from desktop.clipboard import read_images
+
+        return read_images()
+
+    def update_diagnostics(self):
+        return self._updates.diagnostics()
+
+    def open_update_logs(self):
+        return self._updates.open_logs()
+
     def install_update(self, dirty: bool, saving: bool):
         with self._lock:
             if dirty or saving or self._dirty or self._saving:
@@ -51,8 +62,8 @@ def confirm_close(state: DraftState, confirm: Callable[[str, str], bool]) -> boo
     with state._lock:
         dirty, saving = state._dirty, state._saving
     if saving:
-        confirm("正在儲存", "照片正在儲存，請完成後再關閉。")
+        confirm("正在儲存", "照片或設定正在儲存，請完成後再關閉。")
         return False
     if dirty:
-        return confirm("尚未儲存", "目前有尚未儲存的照片或案件資料，確定關閉？")
+        return confirm("尚未儲存", "目前有尚未儲存的照片、案件資料或設定，確定關閉？")
     return True

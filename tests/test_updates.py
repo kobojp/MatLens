@@ -377,6 +377,11 @@ def test_install_handoff_records_actual_target_and_pending_version(tmp_path, mon
     pending = tmp_path / "MatLens/updates/pending.json"
     if fail:
         assert not pending.exists()
+        events = (tmp_path / "MatLens/logs/updates" / service._job_dir.name / "client.log")
+        failure = json.loads(events.read_text("utf-8").splitlines()[-1])
+        assert failure["event"] == "failed"
+        assert failure["failed_stage"] == "install.launch_worker"
+        assert failure["error_type"] == "OSError"
     else:
         assert json.loads(pending.read_text("utf-8"))["version"] == NEWER_VERSION
 
@@ -433,6 +438,16 @@ def test_failed_preflight_keeps_program_database_and_photos(tmp_path, monkeypatc
     monkeypatch.setattr("desktop.updater.subprocess.run", failed_probe)
     with pytest.raises((subprocess.CalledProcessError, subprocess.TimeoutExpired, RuntimeError)):
         apply_update(job)
+    progress = json.loads((work / "progress.json").read_text("utf-8"))
+    assert progress["stage"] == "failed"
+    assert progress["failed_stage"] == "preflight"
+    assert progress["job_id"] == work.name
+    assert "未替換程式" in progress["message"]
+    worker_log = data / "logs/updates" / work.name / "worker.log"
+    entries = [json.loads(line) for line in worker_log.read_text("utf-8").splitlines()]
+    assert entries[-1]["event"] == "failed"
+    assert entries[-1]["failed_stage"] == "preflight"
+    assert entries[-1]["error_type"] and entries[-1]["traceback"]
     assert (target / "MatLens.exe").read_bytes() == b"original-program"
     assert (data / "matlens.db").read_bytes() == database_bytes
     assert photo.read_bytes() == b"original-photo"
@@ -442,3 +457,21 @@ def test_failed_preflight_keeps_program_database_and_photos(tmp_path, monkeypatc
     with closing(sqlite3.connect(data / "backups" / f"before-update-{work.name}.db")) as backup:
         assert backup.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert backup.execute("SELECT value FROM custom_options").fetchone()[0] == "原始清冊"
+
+
+def test_diagnostics_reads_only_bounded_job_metadata_not_database(tmp_path):
+    updates = tmp_path / "updates"
+    work = updates / ("a" * 32)
+    work.mkdir(parents=True)
+    (tmp_path / "matlens.db").write_bytes(b"never-expose-database")
+    (work / "job.json").write_text(json.dumps({"channel": "stable"}), "utf-8")
+    (work / "progress.json").write_text(json.dumps({"stage": "preflight"}), "utf-8")
+    (work / "probe.json").write_text("invalid-json", "utf-8")
+    (work / "private.txt").write_text("never-expose-private-file", "utf-8")
+    (updates / "unrelated").mkdir()
+    report = UpdateService(tmp_path).diagnostics()
+    assert len(report["jobs"]) == 1
+    assert report["jobs"][0]["reports"]["progress.json"]["stage"] == "preflight"
+    assert "error" in report["jobs"][0]["reports"]["probe.json"]
+    serialized = json.dumps(report)
+    assert "never-expose" not in serialized

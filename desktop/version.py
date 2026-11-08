@@ -1,3 +1,3 @@
-VERSION = "0.5.5"
+VERSION = "0.5.6"
 # Auto-update only accepts releases preserving this database contract.
 DATA_COMPATIBILITY = 1

@@ -303,3 +303,23 @@ legend { margin-bottom: 7px; color: #5e6d75; font-size: 12px; }
 .overview-names-mode button + button { border-left: 0; }
 .overview-names-mode button.active { color: #fff; background: #1f6f5c; border-color: #1f6f5c; }
 .database-location { overflow-wrap: anywhere; color: #52636e; font-size: 13px; }
+.storage-bar.has-destination { border-color: #a6cdbd; }
+.storage-bar { position: sticky; top: var(--topbar-height, 74px); z-index: 19; }
+.destination-badge { width: fit-content; padding: 7px 10px; border-radius: 6px; background: #e8f4f0; color: #1f6f5c; }
+.needs-destination .destination-badge { background: #fff4dc; color: #825315; }
+.storage-save-status { margin: 10px 0 0; color: #52636e; font-size: 12px; }
+.paste-backdrop { z-index: 80; }
+.paste-confirmation { width: min(680px, 100%); max-height: 88vh; overflow: auto; padding: 24px; border-radius: 10px; background: #fff; }
+.paste-confirmation h2 { margin: 0 0 8px; font-size: 20px; }
+.paste-previews { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 16px 0; }
+.paste-previews figure { min-width: 0; margin: 0; }
+.paste-previews img { width: 100%; height: 180px; object-fit: contain; border-radius: 6px; background: #edf1f3; }
+.paste-previews figcaption { overflow-wrap: anywhere; font-size: 12px; color: #52636e; margin-top: 5px; }
+.paste-actions { display: flex; gap: 10px; justify-content: flex-end; }
+.update-diagnostics { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+@media (max-width: 760px) {
+  .storage-bar { grid-template-columns: minmax(0, 1fr) auto; }
+  .storage-bar .destination-badge { grid-column: 1 / -1; }
+  .topbar-actions { flex-wrap: wrap; }
+  .paste-confirmation { padding: 18px; }
+}

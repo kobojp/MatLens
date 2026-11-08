@@ -33,6 +33,8 @@ def main() -> int:
     data_dir = (Path(tempfile.mkdtemp(prefix="matlens-self-test-"))
                 if args.self_test else user_data_dir())
     data_dir.mkdir(parents=True, exist_ok=True)
+    if args.self_test:
+        (data_dir / "photos" / "底座").mkdir(parents=True, exist_ok=True)
     if args.startup_report:
         if (args.startup_report.resolve().parent.parent != (data_dir / "updates").resolve()
                 or args.startup_report.name != "startup.json"):
@@ -122,20 +124,37 @@ def main() -> int:
                             return
                         import time
 
+                        from desktop.update_log import record_event
+
+                        startup_job = args.startup_report.parent.name
+                        record_event(data_dir, startup_job, "startup", "startup.wait_ui")
+
                         if not window.events.loaded.wait(30):
+                            record_event(data_dir, startup_job, "startup", "startup.failed",
+                                         message="WebView2 未完成載入。")
                             return
                         for _ in range(50):
-                            if window.evaluate_js(
-                                "document.querySelector('h1')?.textContent === 'MatLens'"
-                            ):
+                            try:
+                                ready = window.evaluate_js(
+                                    "document.querySelector('h1')?.textContent === 'MatLens'"
+                                )
+                            except Exception as error:
+                                record_event(data_dir, startup_job, "startup", "startup.failed",
+                                             error=error)
+                                return
+                            if ready:
                                 staged = args.startup_report.with_suffix(".tmp")
                                 startup = {"ok": True, "version": VERSION, "pid": os.getpid(),
                                            "executable": str(Path(sys.executable).resolve())}
                                 staged.write_text(json.dumps(startup), encoding="utf-8")
                                 staged.replace(args.startup_report)
+                                record_event(data_dir, startup_job, "startup", "startup.ready",
+                                             version=VERSION)
                                 window.show()
                                 return
                             time.sleep(0.2)
+                        record_event(data_dir, startup_job, "startup", "startup.failed",
+                                     message="MatLens 介面未通過啟動檢查。")
 
                     webview.start(report_startup, gui="edgechromium", private_mode=True)
             finally:
@@ -160,6 +179,11 @@ def main() -> int:
         return 0
     except Exception as error:
         logging.exception("Desktop startup/runtime failed")
+        if args.startup_report:
+            from desktop.update_log import record_event
+
+            record_event(data_dir, args.startup_report.parent.name, "startup", "startup.failed",
+                         error=error)
         ctypes.windll.user32.MessageBoxW(
             None, f"{error}\n\n請確認已安裝 Microsoft Edge WebView2 Runtime。\n紀錄：{log_path}",
             "MatLens 無法啟動", 0x10,

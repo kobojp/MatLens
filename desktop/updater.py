@@ -11,11 +11,13 @@ import sys
 import time
 import uuid
 from contextlib import closing
+from datetime import UTC, datetime
 from pathlib import Path
 
 from desktop.data import resource_root, user_data_dir
 from desktop.installation import program_directories, validate_program_directory
 from desktop.update_core import extract_package, verify_manifest, verify_package, version_key
+from desktop.update_log import clean_text, clean_values, record_event
 from desktop.version import VERSION
 
 
@@ -87,7 +89,7 @@ def start_and_check(target: Path, report: Path, version: str):
         raise
 
 
-def apply_update(job: Path):
+def validated_job(job: Path) -> tuple[Path, Path]:
     data = user_data_dir().resolve()
     work = job.resolve().parent
     updates = data / "updates"
@@ -95,6 +97,55 @@ def apply_update(job: Path):
             or any(c not in "0123456789abcdef" for c in work.name)
             or job.name != "job.json"):
         raise ValueError("更新工作目錄不正確。")
+    return data, work
+
+
+def apply_update(job: Path):
+    data, work = validated_job(job)
+    state = {"job_id": work.name, "current": VERSION}
+
+    def progress(stage: str, *, failure: BaseException | None = None, **values):
+        state.update(stage=stage, at=datetime.now(UTC).isoformat(), **values)
+        warning = record_event(data, work.name, "worker", stage, error=failure,
+                               **{key: value for key, value in state.items()
+                                  if key not in {"job_id", "current", "stage", "at"}})
+        if warning:
+            state["log_error"] = warning
+        staged = work / "progress.tmp"
+        staged.write_text(json.dumps(clean_values(state), ensure_ascii=False, indent=2), "utf-8")
+        staged.replace(work / "progress.json")
+
+    progress("verify")
+    try:
+        return _apply_update(job, data, work, progress)
+    except Exception as error:
+        stage = state["stage"]
+        if stage == "preflight":
+            reason = ""
+            probe = work / "probe.json"
+            if probe.exists():
+                try:
+                    reason = str(json.loads(probe.read_text("utf-8")).get("error", ""))[:300]
+                except (ValueError, OSError, AttributeError):
+                    reason = "無法讀取新版自測報告"
+            if isinstance(error, subprocess.TimeoutExpired):
+                reason = "自測程序逾時"
+            message = "新版預先測試失敗，未替換程式。" + (f"原因：{reason}" if reason else "")
+        elif stage == "startup":
+            message = "新版啟動檢查失敗，已嘗試回復原程式；請核對更新診斷。"
+        else:
+            labels = {"verify": "驗證更新", "wait": "等待程式關閉", "backup": "備份資料庫",
+                      "prepare": "準備程式檔案", "replace": "替換程式檔案"}
+            message = f"{labels.get(stage, stage)}未完成：{error}"
+        message = clean_text(message)
+        progress("failed", failure=error, failed_stage=stage, message=message,
+                 detail=clean_text(repr(error)))
+        if stage == "verify" and isinstance(error, ValueError):
+            raise
+        raise RuntimeError(message) from error
+
+
+def _apply_update(job: Path, data: Path, work: Path, progress):
     params = json.loads(job.read_text(encoding="utf-8"))
     # Older apps omit target and always live in the legacy location.
     target = validate_program_directory(Path(params.get("target", program_directories()[1])))
@@ -113,6 +164,7 @@ def apply_update(job: Path):
     if version_key(manifest["version"]) <= version_key(VERSION):
         raise ValueError("拒絕安裝相同或較舊版本。")
     verify_package(work / "package.zip", manifest)
+    progress("wait", version=manifest["version"], target=str(target))
     wait_for_parent(pid)
     from desktop.instance import SingleInstance
 
@@ -121,17 +173,20 @@ def apply_update(job: Path):
         guard.close()
         raise RuntimeError("MatLens 仍在執行，停止更新。")
     try:
+        progress("backup")
         backup = data / "backups" / f"before-update-{work.name}.db"
         backup_database(data / "matlens.db", backup)
         unpacked = extract_package(work / "package.zip", work / "unpacked")
         # Real WebView2 + save/reload flow against an isolated temporary database.
         probe = work / "probe.json"
+        progress("preflight")
         subprocess.run([str(unpacked / "MatLens.exe"), "--self-test", "--report", str(probe)],
                        cwd=unpacked, timeout=90, check=True)
         probe_result = json.loads(probe.read_text("utf-8"))
         if not probe_result.get("ok") or probe_result.get("version") != manifest["version"]:
             raise RuntimeError("新版預先測試失敗，未替換程式。")
         suffix = uuid.uuid4().hex
+        progress("prepare")
         prepared = target.with_name(f"{target.name}.next-{suffix}")
         previous = target.with_name(f"{target.name}.previous-{suffix}")
         if prepared.resolve().parent != target.resolve().parent:
@@ -143,30 +198,73 @@ def apply_update(job: Path):
     finally:
         guard.close()
     # New app needs the instance mutex. Update lock below prevents overlapping workers.
-    swap_program(target, prepared, previous,
-                 lambda folder: start_and_check(folder, work / "startup.json", manifest["version"]))
+    def start(folder):
+        progress("startup")
+        start_and_check(folder, work / "startup.json", manifest["version"])
+
+    progress("replace")
+    try:
+        swap_program(target, prepared, previous, start)
+    except Exception as error:
+        record_event(data, work.name, "worker", "rollback.state", error=error,
+                     target_exists=target.is_dir(), previous_exists=previous.exists(),
+                     prepared_exists=prepared.exists())
+        raise
+    progress("complete", message=f"已更新至 {manifest['version']}。")
     return {"ok": True, "message": f"已更新至 {manifest['version']}。", **journal}
 
 
 def main() -> int:
     updates = user_data_dir() / "updates"
-    updates.mkdir(parents=True, exist_ok=True)
+    requested_id = Path(sys.argv[1]).parent.name if len(sys.argv) > 1 else ""
+    job_id = (requested_id if len(requested_id) == 32
+              and all(char in "0123456789abcdef" for char in requested_id) else uuid.uuid4().hex)
+    record_event(updates.parent, job_id, "worker", "worker.start")
+    try:
+        updates.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        record_event(updates.parent, job_id, "worker", "failed", error=error,
+                     failed_stage="prepare_work_directory")
+        return 1
     lock = updates / "install.lock"
     try:
         with lock.open("x", encoding="utf-8") as output:
             output.write(str(os.getpid()))
     except FileExistsError:
+        record_event(updates.parent, job_id, "worker", "lock.busy",
+                     message="已有更新工作或殘留更新鎖，未開始替換程式。")
+        return 1
+    except OSError as error:
+        record_event(updates.parent, job_id, "worker", "failed", error=error,
+                     failed_stage="acquire_lock")
         return 1
     try:
         try:
             result = apply_update(Path(sys.argv[1]))
         except Exception as error:
-            result = {"ok": False, "message": str(error),
+            details = {}
+            try:
+                _, work = validated_job(Path(sys.argv[1]))
+                details = json.loads((work / "progress.json").read_text("utf-8"))
+            except (OSError, ValueError, IndexError):
+                pass
+            if not details:
+                record_event(updates.parent, job_id, "worker", "failed", error=error,
+                             failed_stage="validate_or_prepare_job")
+            result = {**details, "ok": False, "message": details.get("message", str(error)),
                       "job_id": Path(sys.argv[1]).parent.name if len(sys.argv) > 1 else ""}
         report = updates / "last-result.json"
         staged_report = updates / "last-result.tmp"
-        staged_report.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-        staged_report.replace(report)
+        try:
+            staged_report.write_text(json.dumps(result, ensure_ascii=False, indent=2),
+                                     encoding="utf-8")
+            staged_report.replace(report)
+        except OSError as error:
+            record_event(updates.parent, job_id, "worker", "failed", error=error,
+                         failed_stage="save_result")
+            return 1
+        record_event(updates.parent, job_id, "worker",
+                     "result.saved", ok=result["ok"], message=result["message"])
         if not result["ok"]:
             ctypes.windll.user32.MessageBoxW(
                 None, f"{result['message']}\n照片與案件資料保留。\n紀錄：{report}",

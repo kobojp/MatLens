@@ -5,16 +5,19 @@ import OptionField from "./OptionField";
 import OverviewModal from "./OverviewModal";
 import RoleOrderEditor from "./RoleOrderEditor";
 import PhotoPreview from "./PhotoPreview";
+import PhotoLightbox from "./PhotoLightbox";
+import UISettings from "./UISettings";
+import useUIPreferences from "./useUIPreferences";
 import StorageDestination from "./StorageDestination";
 import UpdatePanel from "./UpdatePanel";
+import useStorageSelection from "./useStorageSelection";
+import useClipboardImages from "./useClipboardImages";
+import PasteConfirmation from "./PasteConfirmation";
 import type {
   CaseRecord,
   CustomOptionKind,
-  FreeScanResult,
   PhotoDraft,
   ReferenceValues,
-  StorageMode,
-  StorageTree,
 } from "./types";
 import {
   DEFAULT_ROLE_ORDER,
@@ -59,48 +62,59 @@ export default function App() {
   const [updateInstalling, setUpdateInstalling] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [page, setPage] = useState<"workspace" | "settings">("workspace");
+  const [viewerId, setViewerId] = useState("");
+  const ui = useUIPreferences();
+  const tiles = ui.value.layout === "tiles";
+  const topPanel = tiles && ui.value.panel_position === "top";
+  const collapsed = topPanel && ui.value.panel_collapsed;
+  const clipboard = useClipboardImages(photos.length,
+    updateInstalling || saving || page !== "workspace" || !!viewerId, setError);
+  const modalOpen = !!viewerId || clipboard.pending.length > 0;
+  const ignorePhotoClick = useRef(false);
+  const expandingPanel = useRef(false);
   const [dragging, setDragging] = useState(false);
-  const [storageRoot, setStorageRoot] = useState("");
-  const [choosingStorage, setChoosingStorage] = useState(false);
-  const [storageTree, setStorageTree] = useState<StorageTree | null>(null);
-  const [selectedMonth, setSelectedMonth] = useState("");
-  const [selectedSubfolder, setSelectedSubfolder] = useState("");
-  const [loadingFolders, setLoadingFolders] = useState(false);
-  const [creatingFolders, setCreatingFolders] = useState(false);
-  const [showFolderCreator, setShowFolderCreator] = useState(false);
-  const [folderPresets, setFolderPresets] = useState<string[]>(["底座", "探頭"]);
-  const [customFolderName, setCustomFolderName] = useState("");
-  const [storageMode, setStorageMode] = useState<StorageMode>("month");
-  const [freeScanPath, setFreeScanPath] = useState("");
-  const [freeScanResult, setFreeScanResult] = useState<FreeScanResult | null>(null);
-  const [freeSelectedSubfolder, setFreeSelectedSubfolder] = useState("");
-  const [freeLoadingFolders, setFreeLoadingFolders] = useState(false);
-  const [freeWithDate, setFreeWithDate] = useState(true);
+  const storage = useStorageSelection();
+  const storageRoot = storage.result?.root || "";
+  const freeSelectedSubfolder = storage.valid ? storage.selection.subfolder : "";
+  const freeWithDate = storage.selection.with_date;
+  const settingsSaving = storage.saveStatus === "儲存中…" || ui.saving;
   const [customOptionKind, setCustomOptionKind] = useState<CustomOptionKind | null>(null);
   const [customOptionValue, setCustomOptionValue] = useState("");
   const [savingCustomOption, setSavingCustomOption] = useState(false);
   const [deletingOption, setDeletingOption] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
+  const header = useRef<HTMLElement>(null);
   const latestPhotos = useRef<PhotoDraft[]>([]);
   const draftFields = JSON.stringify({ workDate, building, floor, addressCode, material, issues, location, notes });
   const cleanFields = useRef(draftFields);
   const stateSequence = useRef(0);
 
   useEffect(() => {
+    const element = header.current;
+    if (!element) return;
+    const resize = () => element.parentElement?.style.setProperty("--topbar-height", `${element.offsetHeight || 74}px`);
+    resize();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(resize);
+    observer?.observe(element);
+    return () => observer?.disconnect();
+  }, []);
+
+  useEffect(() => {
     window.matlensDesktopState = {
-      dirty: photos.length > 0 || draftFields !== cleanFields.current,
-      saving,
+      dirty: photos.length > 0 || draftFields !== cleanFields.current || storage.saveStatus.startsWith("儲存失敗") || ui.failed,
+      saving: saving || settingsSaving,
     };
     const sendState = () => {
       const state = window.matlensDesktopState!;
       stateSequence.current = Math.max(stateSequence.current + 1, Date.now() * 1000);
-      window.pywebview?.api.update_state(stateSequence.current, state.dirty, state.saving)
+      window.pywebview?.api.update_state?.(stateSequence.current, state.dirty, state.saving)
         .catch(() => setError("無法同步桌面儲存狀態，請先完成儲存再關閉程式。"));
     };
     sendState();
     window.addEventListener("pywebviewready", sendState);
     return () => window.removeEventListener("pywebviewready", sendState);
-  }, [photos.length, draftFields, saving]);
+  }, [photos.length, draftFields, saving, settingsSaving, storage.saveStatus, ui.failed]);
 
   useEffect(() => {
     const preventFileNavigation = (event: DragEvent) => event.preventDefault();
@@ -121,30 +135,19 @@ export default function App() {
   );
 
   const folderPreview = useMemo(() => {
-    const issueText = issues.map(safeName).join("-");
-    // 棟別與樓層連寫（二門診1F），其餘欄位以空白分隔
     const buildingFloor = `${safeName(building)}${safeName(floor)}`;
-    if (storageMode === "free") {
-      const subfolder = freeSelectedSubfolder || "請選子目錄";
-      // 日期受 freeWithDate 控制，放在案件資料夾名稱中
-      const caseParts = freeWithDate
-        ? [workDate, buildingFloor, addressCode, material, issueText]
-        : [buildingFloor, addressCode, material, issueText];
-      const caseFolder = caseParts.map(safeName).join(" ");
-      return `${subfolder}\\${caseFolder}`;
-    }
-    // 月份模式：日期永遠在案件資料夾名稱，空白分隔
-    const caseFolder = [workDate, buildingFloor, addressCode, material, issueText].map(safeName).join(" ");
-    return `${selectedMonth || "請選月份"}\\${selectedSubfolder || "請選子目錄"}\\${caseFolder}`;
-  }, [workDate, building, floor, addressCode, material, issues, selectedMonth, selectedSubfolder, storageMode, freeSelectedSubfolder, freeWithDate]);
+    const issueText = issues.map(safeName).join("-");
+    const parts = freeWithDate
+      ? [workDate, buildingFloor, addressCode, material, issueText]
+      : [buildingFloor, addressCode, material, issueText];
+    return `${freeSelectedSubfolder || "請選子目錄"}\\${parts.map(safeName).join(" ")}`;
+  }, [workDate, building, floor, addressCode, material, issues, freeSelectedSubfolder, freeWithDate]);
 
-
-  const destinationSubfolder = storageMode === "free" ? freeSelectedSubfolder : selectedSubfolder;
+  const destinationSubfolder = freeSelectedSubfolder;
   const overviewDefaultMaterial = references.materials.includes(destinationSubfolder)
     ? destinationSubfolder
     : material;
 
-  const selectedMonthEntry = storageTree?.months.find((item) => item.name === selectedMonth);
 
   const missingRoles = ["前", "中"].filter(
     (role) => !photos.some((photo) => photo.role === role),
@@ -177,38 +180,6 @@ export default function App() {
     }
   }, [query, caseBuilding, caseMaterial, casePage]);
 
-  const loadStorageTree = useCallback(async (
-    date: string,
-    preferredMonth = "",
-    preferredSubfolder = "",
-    preferredMaterial = "",
-  ) => {
-    setLoadingFolders(true);
-    try {
-      const response = await fetch(`/api/settings/storage/tree?work_date=${encodeURIComponent(date)}`);
-      const payload = (await response.json()) as StorageTree;
-      if (!response.ok) throw new Error(errorText(payload));
-      setStorageTree(payload);
-      const monthName = preferredMonth || payload.target_month;
-      const month = payload.months.find((item) => item.name === monthName);
-      const subfolder = month?.subfolders.includes(preferredSubfolder)
-        ? preferredSubfolder
-        : month?.subfolders.includes(preferredMaterial)
-          ? preferredMaterial
-          : month?.subfolders[0] ?? "";
-      setSelectedMonth(monthName);
-      setSelectedSubfolder(subfolder);
-      setShowFolderCreator(!month || !month.subfolders.length);
-    } catch (treeError) {
-      setStorageTree(null);
-      setSelectedMonth("");
-      setSelectedSubfolder("");
-      setError(treeError instanceof Error ? treeError.message : "無法掃描儲存目錄。");
-    } finally {
-      setLoadingFolders(false);
-    }
-  }, []);
-
   useEffect(() => {
     fetch("/api/settings/database")
       .then((response) => response.ok ? response.json() : Promise.reject())
@@ -225,10 +196,6 @@ export default function App() {
         custom_issues: [...new Set([...(payload.custom_issues ?? []), ...current.custom_issues])],
       })))
       .catch(() => undefined);
-    fetch("/api/settings/storage")
-      .then((response) => (response.ok ? response.json() : Promise.reject()))
-      .then((payload: { path: string }) => setStorageRoot(payload.path))
-      .catch(() => undefined);
     fetch("/api/settings/role-order")
       .then((response) => (response.ok ? response.json() : Promise.reject()))
       .then((payload: { roles: string[] }) => { if (payload.roles?.length) setRoleOrder(payload.roles); })
@@ -237,15 +204,7 @@ export default function App() {
       .then((response) => (response.ok ? response.json() : Promise.reject()))
       .then((payload: { enabled: boolean }) => setNameWithSequence(Boolean(payload.enabled)))
       .catch(() => undefined);
-    fetch("/api/settings/free-scan-path")
-      .then((response) => (response.ok ? response.json() : Promise.reject()))
-      .then((payload: { path: string }) => { if (payload.path) setFreeScanPath(payload.path); })
-      .catch(() => undefined);
   }, []);
-
-  useEffect(() => {
-    if (storageRoot) void loadStorageTree(workDate, "", "", material);
-  }, [storageRoot, workDate, loadStorageTree]);
 
   useEffect(() => {
     const timer = window.setTimeout(loadCases, 200);
@@ -309,6 +268,7 @@ export default function App() {
   }
 
   function endPhotoDrag() {
+    setTimeout(() => { ignorePhotoClick.current = false; }, 0);
     draggedPhoto.current = "";
     setDraggedPhotoId("");
     setDragOverPhotoId("");
@@ -331,6 +291,7 @@ export default function App() {
     photos.forEach((photo) => URL.revokeObjectURL(photo.url));
     setPhotos([]);
     setSelectedPhotoId("");
+    setViewerId("");
     setFloor("");
     setAddressCode("");
     setLocation("");
@@ -344,19 +305,13 @@ export default function App() {
     setError("");
     setNotice("");
     if (!photos.length || !floor.trim() || !addressCode.trim()) {
+      if (collapsed) ui.update({ panel_collapsed: false });
       setError("請加入照片，並填寫樓層與定址碼。");
       return;
     }
-    if (storageMode === "month") {
-      if (!selectedMonthEntry || !selectedSubfolder) {
-        setError("請先選擇已存在的月份資料夾與子目錄。");
-        return;
-      }
-    } else {
-      if (!freeScanResult || !freeSelectedSubfolder) {
-        setError("請先掃描目錄並選擇子目錄。");
-        return;
-      }
+    if (!storage.valid) {
+      setError("請先掃描目錄並選擇有效的子目錄。");
+      return;
     }
     setSaving(true);
     const form = new FormData();
@@ -370,18 +325,10 @@ export default function App() {
     form.set("notes", notes);
     form.set("photo_roles", JSON.stringify(photos.map((photo) => photo.role)));
     form.set("name_with_sequence", nameWithSequence ? "true" : "false");
-    if (storageMode === "month") {
-      form.set("storage_month", selectedMonth);
-      form.set("storage_subfolder", selectedSubfolder);
-      form.set("free_scan_root", "");
-      form.set("free_with_date", "true");
-    } else {
-      // 自由路徑模式：子目錄原名不動，日期前綴由後端加到案件資料夾名稱
-      form.set("storage_month", "");
-      form.set("storage_subfolder", freeSelectedSubfolder);
-      form.set("free_scan_root", freeScanResult!.root);
-      form.set("free_with_date", freeWithDate ? "true" : "false");
-    }
+    form.set("storage_month", "");
+    form.set("storage_subfolder", freeSelectedSubfolder);
+    form.set("free_scan_root", storage.result!.root);
+    form.set("free_with_date", freeWithDate ? "true" : "false");
     photos.forEach((photo) => form.append("photos", photo.file, photo.file.name));
     try {
       const response = await fetch("/api/cases", { method: "POST", body: form });
@@ -427,13 +374,7 @@ export default function App() {
   }
 
   function currentScanPath(): string {
-    if (storageMode !== "free") return storageRoot;
-    let scanPath = freeScanResult?.root || freeScanPath.trim();
-    if (freeScanResult && freeSelectedSubfolder) {
-      const separator = scanPath.includes("\\") ? "\\" : "/";
-      scanPath = `${scanPath.replace(/[\\/]$/, "")}${separator}${freeSelectedSubfolder}`;
-    }
-    return scanPath;
+    return storage.valid ? storage.destination : storage.result?.root || "";
   }
 
   async function rescanCases() {
@@ -483,79 +424,6 @@ export default function App() {
     }
   }
 
-  async function chooseStorageRoot() {
-    setError("");
-    setChoosingStorage(true);
-    try {
-      const response = await fetch("/api/settings/storage/pick-folder", { method: "POST" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(errorText(payload));
-      setStorageRoot(String(payload.path));
-      if (!payload.cancelled) setNotice("照片儲存目錄已更新。");
-    } catch (storageError) {
-      setError(storageError instanceof Error ? storageError.message : "無法設定儲存目錄。");
-    } finally {
-      setChoosingStorage(false);
-    }
-  }
-
-  function chooseMonth(monthName: string) {
-    const month = storageTree?.months.find((item) => item.name === monthName);
-    setSelectedMonth(monthName);
-    setSelectedSubfolder(
-      month?.subfolders.includes(material) ? material : month?.subfolders[0] ?? "",
-    );
-    setShowFolderCreator(!month || !month.subfolders.length);
-  }
-
-  async function scanFreeDirectory(path: string) {
-    const trimmed = path.trim();
-    if (!trimmed) { setError("請輸入或選擇要掃描的路徑。"); return; }
-    setError("");
-    setFreeLoadingFolders(true);
-    setFreeScanResult(null);
-    setFreeSelectedSubfolder("");
-    try {
-      const response = await fetch(`/api/settings/storage/scan?path=${encodeURIComponent(trimmed)}`);
-      const payload = await response.json();
-      if (!response.ok) throw new Error(errorText(payload));
-      const result = payload as FreeScanResult;
-      setFreeScanResult(result);
-      setFreeSelectedSubfolder(result.subfolders[0] ?? "");
-      // 掃描成功後靜默儲存路徑
-      fetch("/api/settings/free-scan-path", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: trimmed }),
-      }).catch(() => undefined);
-    } catch (scanError) {
-      setError(scanError instanceof Error ? scanError.message : "無法掃描目錄。");
-    } finally {
-      setFreeLoadingFolders(false);
-    }
-  }
-
-
-  async function chooseFreeFolder() {
-    setError("");
-    setFreeLoadingFolders(true);
-    try {
-      const response = await fetch("/api/settings/storage/pick-folder", { method: "POST" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(errorText(payload));
-      if (!payload.cancelled) {
-        const selectedPath = String(payload.path);
-        setFreeScanPath(selectedPath);
-        await scanFreeDirectory(selectedPath);
-      }
-    } catch (pickError) {
-      setError(pickError instanceof Error ? pickError.message : "無法開啟資料夾選擇器。");
-    } finally {
-      setFreeLoadingFolders(false);
-    }
-  }
-
-
   function changeNameSequence(enabled: boolean) {
     setNameWithSequence(enabled);
     fetch("/api/settings/name-sequence", {
@@ -563,43 +431,6 @@ export default function App() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled }),
     }).catch(() => setError("無法儲存檔名序號設定。"));
-  }
-
-  function toggleFolderPreset(name: string) {
-    setFolderPresets((current) => (
-      current.includes(name)
-        ? current.filter((item) => item !== name)
-        : [...current, name]
-    ));
-  }
-
-  async function createFolders() {
-    const customName = customFolderName.trim();
-    const subfolders = [...new Set([...folderPresets, ...(customName ? [customName] : [])])];
-    if (!selectedMonth || !subfolders.length) {
-      setError("請至少選擇或輸入一個子目錄名稱。");
-      return;
-    }
-    setError("");
-    setCreatingFolders(true);
-    try {
-      const response = await fetch("/api/settings/storage/folders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ month: selectedMonth, subfolders }),
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(errorText(payload));
-      const preferred = customName || (subfolders.includes(material) ? material : subfolders[0]);
-      setCustomFolderName("");
-      setShowFolderCreator(false);
-      await loadStorageTree(workDate, selectedMonth, preferred, material);
-      setNotice(`${selectedMonth}及子目錄已準備完成。`);
-    } catch (folderError) {
-      setError(folderError instanceof Error ? folderError.message : "無法建立資料夾。");
-    } finally {
-      setCreatingFolders(false);
-    }
   }
 
   async function addCustomOption(kind: CustomOptionKind) {
@@ -693,199 +524,17 @@ export default function App() {
     }
   }
 
-  return (
-    <div className="app-shell">
-      <header className="topbar" inert={updateInstalling}>
-        <div className="brand-block">
-          <div className="brand-mark">ML</div>
-          <div>
-            <h1>MatLens</h1>
-            <p>消防材料更換照片管理</p>
-          </div>
-        </div>
-        <div className="topbar-actions">
-          <span className="local-badge">本機離線儲存</span>
-          <button className="button secondary" type="button" onClick={() => fileInput.current?.click()}>
-            ＋ 匯入照片
-          </button>
-          <button className="button primary" type="submit" form="case-form" disabled={saving}>
-            {saving ? "儲存中…" : "儲存案件"}
-          </button>
-        </div>
-      </header>
-
-      <UpdatePanel onInstalling={setUpdateInstalling} />
-
-      <div className="storage-bar" inert={updateInstalling}>
-        <span>照片儲存目錄</span>
-        <code title={storageRoot}>{storageRoot || "讀取中…"}</code>
-        <button type="button" onClick={chooseStorageRoot} disabled={choosingStorage}>
-          {choosingStorage ? "等待選擇…" : "選擇目錄"}
-        </button>
-      </div>
-
-      {(error || notice) && (
-        <div className={`message ${error ? "error" : "success"}`} role={error ? "alert" : "status"}>
-          <span>{error || notice}</span>
-          <button type="button" aria-label="關閉訊息" onClick={() => { setError(""); setNotice(""); }}>×</button>
-        </div>
-      )}
-
-      <main inert={updateInstalling}>
-        <form id="case-form" className="workspace" onSubmit={saveCase}>
-          <section
-            className={`photo-rail ${dragging ? "dragging" : ""}`}
-            aria-label="本次照片"
-            onDragEnter={(event) => { event.preventDefault(); if (!draggedPhoto.current) setDragging(true); }}
-            onDragOver={(event) => event.preventDefault()}
-            onDragLeave={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                setDragging(false);
-              }
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              setDragging(false);
-              if (draggedPhoto.current) return; // 縮圖排序，不是新增檔案
-              addFiles(event.dataTransfer.files);
-            }}
-          >
-            <div className="section-heading">
-              <div><span className="eyebrow">STEP 1</span><h2>本次照片</h2></div>
-              <span className="count-label">{photos.length} 張</span>
-            </div>
-            {!photos.length ? (
-              <button
-                className={`drop-zone ${dragging ? "dragging" : ""}`}
-                type="button"
-                onClick={() => fileInput.current?.click()}
-              >
-                <span className="drop-icon">＋</span>
-                <strong>拉入 3～5 張照片</strong>
-                <small>或點此選擇 JPG、PNG、WebP</small>
-              </button>
-            ) : (
-              <div className="thumbnail-list">
-                {photos.map((photo, index) => (
-                  <div
-                    className={`thumbnail-item ${photo.id === selectedPhoto?.id ? "selected" : ""} ${draggedPhotoId === photo.id ? "dragging" : ""} ${dragOverPhotoId === photo.id ? "drop-target" : ""}`}
-                    key={photo.id}
-                    draggable
-                    onDragStart={() => { draggedPhoto.current = photo.id; setDraggedPhotoId(photo.id); }}
-                    onDragOver={(event) => {
-                      if (!draggedPhoto.current) return;
-                      event.preventDefault();
-                      setDragOverPhotoId(photo.id);
-                    }}
-                    onDragEnd={endPhotoDrag}
-                    onDrop={(event) => {
-                      if (!draggedPhoto.current) return;
-                      event.preventDefault();
-                      event.stopPropagation();
-                      movePhoto(photos.findIndex((item) => item.id === draggedPhoto.current), index);
-                      endPhotoDrag();
-                    }}
-                  >
-                    <button type="button" className="thumbnail-button" onClick={() => setSelectedPhotoId(photo.id)}>
-                      <img src={photo.url} alt={`${photo.role}：${photo.file.name}`} />
-                      <span className="thumbnail-copy"><strong>{photo.role}</strong><small>{photo.file.name}</small></span>
-                    </button>
-                    <button type="button" className="remove-photo" aria-label={`移除 ${photo.file.name}`} onClick={() => removePhoto(photo.id)}>×</button>
-                    <span className="photo-number">{String(index + 1).padStart(2, "0")}</span>
-                    <span className="move-photo">
-                      <button type="button" aria-label={`將 ${photo.file.name} 往前移`} disabled={index === 0} onClick={() => movePhoto(index, index - 1)}>◀</button>
-                      <button type="button" aria-label={`將 ${photo.file.name} 往後移`} disabled={index === photos.length - 1} onClick={() => movePhoto(index, index + 1)}>▶</button>
-                    </span>
-                  </div>
-                ))}
-                <button className="add-more" type="button" onClick={() => fileInput.current?.click()}>＋ 加入照片</button>
-              </div>
-            )}
-            <RoleOrderEditor roles={roleOrder} allRoles={references.photo_roles} onChange={changeRoleOrder} />
-            <input
-              ref={fileInput}
-              className="sr-only"
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              multiple
-              onChange={(event) => event.target.files && addFiles(event.target.files)}
-            />
-          </section>
-
-          <section className="preview-panel">
-            <div className="section-heading">
-              <div><span className="eyebrow">STEP 2</span><h2>照片預覽與命名</h2></div>
-              {selectedPhoto && <span className="role-label">{selectedPhoto.role}</span>}
-            </div>
-            {selectedPhoto ? (
-              <PhotoPreview key={selectedPhoto.id} src={selectedPhoto.url} alt={selectedPhoto.file.name} />
-            ) : (
-              <div className="image-stage">
-                <div className="empty-preview"><span>尚未匯入照片</span><small>照片會在這裡放大預覽</small></div>
-              </div>
-            )}
-            {selectedPhoto && (
-              <div className="role-editor">
-                <label htmlFor="photo-role">這張照片是</label>
-                <select id="photo-role" value={selectedPhoto.role} onChange={(event) => setPhotoRole(selectedPhoto.id, event.target.value)}>
-                  {references.photo_roles.map((role) => <option key={role}>{role}</option>)}
-                </select>
-                <div className="generated-name"><span>儲存檔名</span><strong>{generatedNames[selectedIndex]}</strong></div>
-              </div>
-            )}
-            <label className="name-sequence-toggle">
-              <input
-                type="checkbox"
-                checked={nameWithSequence}
-                onChange={(event) => changeNameSequence(event.target.checked)}
-              />
-              檔名加上序號（01_、02_…）
-            </label>
-            <div className="path-preview">
-              <span>案件資料夾</span>
-              <code>{folderPreview}</code>
-              {storageRoot && <small>{storageRoot}\\{folderPreview}</small>}
-            </div>
-          </section>
-
-          <section className="case-editor">
+  const caseEditor = (
+          <section className="case-editor" key="case-editor">
             <div className="section-heading">
               <div><span className="eyebrow">STEP 3</span><h2>案件資料</h2></div>
-              <span className="autosave-label">常用選項</span>
+              {topPanel ? <button className="button secondary collapse-editor" type="button" disabled={!ui.ready}
+                aria-expanded={!collapsed} aria-controls="case-editor-fields" onClick={() => ui.update({ panel_collapsed: !ui.value.panel_collapsed })}>
+                {collapsed ? "展開案件資料" : "收合案件資料"}</button> : <span className="autosave-label">常用選項</span>}
             </div>
-            <StorageDestination
-              storageMode={storageMode}
-              setStorageMode={setStorageMode}
-              storageTree={storageTree}
-              selectedMonth={selectedMonth}
-              selectedMonthEntry={selectedMonthEntry}
-              selectedSubfolder={selectedSubfolder}
-              setSelectedSubfolder={setSelectedSubfolder}
-              chooseMonth={chooseMonth}
-              loadingFolders={loadingFolders}
-              loadStorageTree={loadStorageTree}
-              workDate={workDate}
-              material={material}
-              materials={references.materials}
-              showFolderCreator={showFolderCreator}
-              setShowFolderCreator={setShowFolderCreator}
-              folderPresets={folderPresets}
-              toggleFolderPreset={toggleFolderPreset}
-              customFolderName={customFolderName}
-              setCustomFolderName={setCustomFolderName}
-              creatingFolders={creatingFolders}
-              createFolders={createFolders}
-              freeScanPath={freeScanPath}
-              setFreeScanPath={setFreeScanPath}
-              scanFreeDirectory={scanFreeDirectory}
-              freeLoadingFolders={freeLoadingFolders}
-              chooseFreeFolder={chooseFreeFolder}
-              freeScanResult={freeScanResult}
-              freeSelectedSubfolder={freeSelectedSubfolder}
-              setFreeSelectedSubfolder={setFreeSelectedSubfolder}
-              freeWithDate={freeWithDate}
-              setFreeWithDate={setFreeWithDate}
-            />
+            {collapsed && <p className="case-summary">{building}{floor || "（未填樓層）"} · {addressCode || "未填定址碼"} · {material || "未選材料"}</p>}
+            <div id="case-editor-fields" className="editor-fields" hidden={collapsed}>
+            <StorageDestination storage={storage} />
 
             <div className="field-grid">
               <label><span>維修日期</span><input type="date" value={workDate} onChange={(event) => setWorkDate(event.target.value)} required /></label>
@@ -965,7 +614,219 @@ export default function App() {
               <strong>{missingRoles.length ? `缺少：${missingRoles.join("、")}` : "前／中／後（或完成）照片齊全"}</strong>
               <span>{photos.length >= 3 && photos.length <= 5 ? "符合建議的 3～5 張照片" : "一般案件建議使用 3～5 張照片"}</span>
             </div>
+            </div>
           </section>
+  );
+
+  return (
+    <div className={`app-shell ${tiles ? "theme-blue" : "theme-classic"}`}>
+      <header ref={header} className="topbar" inert={updateInstalling || modalOpen}>
+        <div className="brand-block">
+          <div className="brand-mark">ML</div>
+          <div>
+            <h1>MatLens</h1>
+            <p>消防材料更換照片管理</p>
+          </div>
+        </div>
+        <div className="topbar-actions">
+          <span className="local-badge">本機離線儲存</span>
+          {!tiles && page === "workspace" && <button className="button secondary" type="button" onClick={() => fileInput.current?.click()}>
+            ＋ 匯入照片
+          </button>}
+          {!tiles && page === "workspace" && <button className="button secondary" type="button" onClick={() => void clipboard.read()}
+            disabled={clipboard.reading || clipboard.pending.length > 0 || saving}>
+            {clipboard.reading ? "讀取剪貼簿…" : "貼上圖片"}
+          </button>}
+          <button className="button primary" type="submit" form="case-form" disabled={page !== "workspace" || saving || !storage.valid || clipboard.pending.length > 0}>
+            {saving ? "儲存中…" : "儲存案件"}
+          </button>
+        </div>
+        <nav className="workspace-nav" role="tablist" aria-label="主頁籤" onKeyDown={event => {
+          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          const next = event.key === "Home" ? "workspace" : event.key === "End" ? "settings" : page === "workspace" ? "settings" : "workspace";
+          setPage(next);
+          event.currentTarget.querySelector<HTMLButtonElement>(`[id=tab-${next}]`)?.focus();
+        }}>
+          {([ ["workspace", "工作區"], ["settings", "設定"] ] as const).map(([id, label]) =>
+            <button key={id} id={`tab-${id}`} type="button" role="tab" aria-selected={page === id}
+              aria-controls={`panel-${id}`} tabIndex={page === id ? 0 : -1} onClick={() => setPage(id)}>{label}</button>)}
+        </nav>
+      </header>
+
+      <div inert={modalOpen}><UpdatePanel onInstalling={setUpdateInstalling} /></div>
+
+      <div className={`storage-bar ${storage.valid ? "has-destination" : "needs-destination"}`} inert={updateInstalling || modalOpen}>
+        <strong className="destination-badge" role="status">
+          {storage.valid ? `目前儲存資料夾：${freeSelectedSubfolder}` : "尚未確認儲存資料夾"}
+        </strong>
+        <code title={storage.destination || storage.path}>{storage.destination || storage.path || "請選擇照片根目錄"}</code>
+        <button type="button" onClick={() => void storage.choose()} disabled={storage.loading}>
+          選擇目錄
+        </button>
+      </div>
+
+      {(error || notice) && (
+        <div className={`message ${error ? "error" : "success"}`} role={error ? "alert" : "status"}>
+          <span>{error || notice}</span>
+          <button type="button" aria-label="關閉訊息" onClick={() => { setError(""); setNotice(""); }}>×</button>
+        </div>
+      )}
+
+      <main id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden={page !== "settings"} inert={updateInstalling || modalOpen}>
+        <UISettings preferences={ui} />
+      </main>
+      <main id="panel-workspace" role="tabpanel" aria-labelledby="tab-workspace" hidden={page !== "workspace"} inert={updateInstalling || modalOpen}>
+        {ui.error && <p role="alert" className="preferences-error">{ui.error} 請開啟設定頁重試。</p>}
+        <form id="case-form" className={`workspace layout-${ui.value.layout} panel-${tiles ? ui.value.panel_position : "right"} tiles-${ui.value.tile_size}`}
+          onSubmit={saveCase} onInvalidCapture={event => {
+            if (!collapsed) return;
+            event.preventDefault();
+            if (expandingPanel.current) return;
+            expandingPanel.current = true;
+            const target = event.target as HTMLInputElement;
+            ui.update({ panel_collapsed: false });
+            setError("請完成案件必填欄位後再儲存。");
+            requestAnimationFrame(() => { target.focus(); expandingPanel.current = false; });
+          }}>
+          {topPanel && caseEditor}
+          <section
+            className={`photo-rail ${dragging ? "dragging" : ""}`}
+            aria-label="本次照片"
+            onDragEnter={(event) => { event.preventDefault(); if (!draggedPhoto.current) setDragging(true); }}
+            onDragOver={(event) => event.preventDefault()}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setDragging(false);
+              }
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              setDragging(false);
+              if (draggedPhoto.current) return; // 縮圖排序，不是新增檔案
+              addFiles(event.dataTransfer.files);
+            }}
+          >
+            <div className="section-heading">
+              <div><span className="eyebrow">STEP 1</span><h2>本次照片</h2></div>
+              <span className="count-label">{photos.length} 張</span>
+              {tiles && <div className="photo-actions">
+                <button className="button secondary" type="button" onClick={() => fileInput.current?.click()}>匯入照片</button>
+                <button className="button secondary" type="button" onClick={() => void clipboard.read()} disabled={clipboard.reading || saving || clipboard.pending.length > 0}>
+                  {clipboard.reading ? "讀取剪貼簿…" : "貼上圖片"}</button>
+              </div>}
+            </div>
+            {!photos.length ? (
+              <button
+                className={`drop-zone ${dragging ? "dragging" : ""}`}
+                type="button"
+                onClick={() => fileInput.current?.click()}
+              >
+                <span className="drop-icon">＋</span>
+                <strong>拉入 3～5 張照片</strong>
+                <small>或點此選擇 JPG、PNG、WebP</small>
+              </button>
+            ) : (
+              <div className="thumbnail-list">
+                {photos.map((photo, index) => (
+                  <div
+                    className={`thumbnail-item ${photo.id === selectedPhoto?.id ? "selected" : ""} ${draggedPhotoId === photo.id ? "dragging" : ""} ${dragOverPhotoId === photo.id ? "drop-target" : ""}`}
+                    key={photo.id}
+                    draggable
+                    onDragStart={event => {
+                      if ((event.target as Element).closest("select, input, .remove-photo, .move-photo")) { event.preventDefault(); return; }
+                      ignorePhotoClick.current = true;
+                      draggedPhoto.current = photo.id; setDraggedPhotoId(photo.id);
+                    }}
+                    onDragOver={(event) => {
+                      if (!draggedPhoto.current) return;
+                      event.preventDefault();
+                      setDragOverPhotoId(photo.id);
+                    }}
+                    onDragEnd={endPhotoDrag}
+                    onDrop={(event) => {
+                      if (!draggedPhoto.current) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      movePhoto(photos.findIndex((item) => item.id === draggedPhoto.current), index);
+                      endPhotoDrag();
+                    }}
+                  >
+                    <button type="button" className="thumbnail-button" aria-label={tiles ? `放大 ${photo.file.name}` : undefined}
+                      onClick={event => {
+                        if (ignorePhotoClick.current || draggedPhoto.current) return;
+                        setSelectedPhotoId(photo.id);
+                        if (tiles) { event.currentTarget.focus({ preventScroll: true }); setViewerId(photo.id); }
+                      }}>
+                      <img src={photo.url} alt={`${photo.role}：${photo.file.name}`} draggable={false} />
+                      <span className="thumbnail-copy"><strong>{photo.role}</strong><small>{photo.file.name}</small></span>
+                    </button>
+                    {tiles && <div className="tile-footer">
+                      <select aria-label={`${photo.file.name} 的角色`} value={photo.role} onChange={event => setPhotoRole(photo.id, event.target.value)}>
+                        {references.photo_roles.map(role => <option key={role}>{role}</option>)}
+                      </select><code title={generatedNames[index]}>{generatedNames[index]}</code>
+                    </div>}
+                    <button type="button" className="remove-photo" aria-label={`移除 ${photo.file.name}`} onClick={() => removePhoto(photo.id)}>×</button>
+                    <span className="photo-number">{String(index + 1).padStart(2, "0")}</span>
+                    <span className="move-photo">
+                      <button type="button" aria-label={`將 ${photo.file.name} 往前移`} disabled={index === 0} onClick={() => movePhoto(index, index - 1)}>◀</button>
+                      <button type="button" aria-label={`將 ${photo.file.name} 往後移`} disabled={index === photos.length - 1} onClick={() => movePhoto(index, index + 1)}>▶</button>
+                    </span>
+                  </div>
+                ))}
+                <button className="add-more" type="button" onClick={() => fileInput.current?.click()}>＋ 加入照片</button>
+              </div>
+            )}
+            <RoleOrderEditor roles={roleOrder} allRoles={references.photo_roles} onChange={changeRoleOrder} />
+            <input
+              ref={fileInput}
+              className="sr-only"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              multiple
+              onChange={(event) => event.target.files && addFiles(event.target.files)}
+            />
+          </section>
+
+          <section className="preview-panel">
+            <div className="section-heading">
+              <div><span className="eyebrow">STEP 2</span><h2>{tiles ? "案件命名" : "照片預覽與命名"}</h2></div>
+              {selectedPhoto && <span className="role-label">{selectedPhoto.role}</span>}
+            </div>
+            {!tiles && <>
+            {selectedPhoto ? (
+              <PhotoPreview key={selectedPhoto.id} src={selectedPhoto.url} alt={selectedPhoto.file.name} />
+            ) : (
+              <div className="image-stage">
+                <div className="empty-preview"><span>尚未匯入照片</span><small>照片會在這裡放大預覽</small></div>
+              </div>
+            )}
+            {selectedPhoto && (
+              <div className="role-editor">
+                <label htmlFor="photo-role">這張照片是</label>
+                <select id="photo-role" value={selectedPhoto.role} onChange={(event) => setPhotoRole(selectedPhoto.id, event.target.value)}>
+                  {references.photo_roles.map((role) => <option key={role}>{role}</option>)}
+                </select>
+                <div className="generated-name"><span>儲存檔名</span><strong>{generatedNames[selectedIndex]}</strong></div>
+              </div>
+            )}
+            </>}
+            <label className="name-sequence-toggle">
+              <input
+                type="checkbox"
+                checked={nameWithSequence}
+                onChange={(event) => changeNameSequence(event.target.checked)}
+              />
+              檔名加上序號（01_、02_…）
+            </label>
+            <div className="path-preview">
+              <span>案件資料夾</span>
+              <code>{folderPreview}</code>
+              {storageRoot && <small>{storageRoot}{"\\"}{folderPreview}</small>}
+            </div>
+          </section>
+
+          {!topPanel && caseEditor}
         </form>
 
         <CaseListSection
@@ -992,6 +853,8 @@ export default function App() {
         />
       </main>
 
+      {viewerId && photos.length > 0 && <PhotoLightbox photos={photos} selectedId={viewerId} names={generatedNames}
+        onSelect={id => { setViewerId(id); setSelectedPhotoId(id); }} onClose={() => setViewerId("")} />}
       {overviewView && (
         <OverviewModal
           buildings={references.buildings}
@@ -1004,6 +867,11 @@ export default function App() {
       )}
 
       {selectedCase && <CaseModal selectedCase={selectedCase} onClose={() => setSelectedCase(null)} />}
+      {clipboard.pending.length > 0 && <PasteConfirmation images={clipboard.pending}
+        onCancel={clipboard.close} onConfirm={() => {
+          addFiles(clipboard.pending.map((item) => item.file));
+          clipboard.close();
+        }} />}
     </div>
   );
 }

@@ -90,6 +90,28 @@ GitHub `releases/latest` 選到；不要將正式更新 manifest 只放在 prere
 更新交接先寫入 `updates/pending.json`，獨立更新器以相同工作識別碼寫入 `last-result.json`。
 若重開後執行版本仍低於成功紀錄的目標版本，畫面會提示尚未生效；舊成功紀錄不能掩蓋新工作尚待確認。
 
+0.5.6 起可在「關於與更新」按 **開啟更新紀錄**，開啟
+`%LOCALAPPDATA%/MatLens/logs/updates/`。每個工作識別碼使用獨立子資料夾：
+
+```text
+logs/updates/<工作識別碼>/
+├─ client.log   檢查、下載、簽章／雜湊驗證、啟動更新器與結果觀察
+├─ worker.log   驗證、等待關閉、備份、預先測試、替換、回復狀態與結果
+└─ startup.log  新版 WebView2 載入與啟動檢查
+```
+
+每行為一筆 JSON，包含 UTC 時間、PID、版本、執行檔位置及事件；失敗另有階段、例外類型、
+原因與 traceback。主程式工作階段也會產生自己的識別碼，用於沒有安裝工作的啟動紀錄。
+不同工作不覆蓋；每筆完成寫入後立即 flush，重開仍可讀。強制結束時可由最後一筆事件判斷停在哪裡，
+但斷電不保證最後一筆已實際寫入磁碟。
+
+紀錄只含更新資訊，不包含照片或資料庫內容，不自動上傳；URL query、登入資訊及 Bearer token
+在寫入前遮蔽。對外分享前仍需遮蔽使用者路徑。若 log 寫入失敗，畫面提示權限／磁碟問題，
+既有更新與資料保護機制仍保留。
+
+這些完整紀錄需先安裝含此功能的 0.5.6 才會生效；舊 0.5.4／0.5.5 不能追溯補寫。
+第一次從舊版升級時，舊更新器仍使用原有 `last-result.json`／`probe.json`，新版啟動後才開始產生新 log。
+
 ```powershell
 uv run --locked python -m tests.run_installer_smoke --compiler $env:MATLENS_ISCC_PATH --report build/installer-smoke.json
 ```

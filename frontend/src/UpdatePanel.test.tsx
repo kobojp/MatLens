@@ -85,3 +85,25 @@ it("顯示實際執行位置與尚未生效的更新，方便辨識舊捷徑", a
   expect(screen.getByText("執行方式：舊路徑安裝")).toBeInTheDocument();
   expect(screen.getByRole("alert")).toHaveTextContent("仍在執行 0.3.0");
 });
+
+it("更新失敗顯示同一工作的階段，診斷只在按鈕觸發後讀取", async () => {
+  window.pywebview!.api.update_status = vi.fn(async () => ({ ...available,
+    last_result: { ok: false, message: "新版預先測試失敗，未替換程式。", failed_stage: "preflight", job_id: "test-job" } }));
+  window.pywebview!.api.update_diagnostics = vi.fn(async () => ({ jobs: [{ job_id: "test-job", stage: "preflight" }] }));
+  render(<UpdatePanel />);
+  fireEvent.click(await screen.findByRole("button", { name: /關於與更新/ }));
+  expect(screen.getByText("失敗階段：新版預先測試")).toBeInTheDocument();
+  expect(window.pywebview!.api.update_diagnostics).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "查看更新診斷" }));
+  expect(await screen.findByText(/"stage": "preflight"/)).toBeInTheDocument();
+});
+
+it("可直接開啟更新紀錄，開啟失敗時保留重試入口", async () => {
+  window.pywebview!.api.open_update_logs = vi.fn(async () => ({ error: "無法開啟更新紀錄資料夾。" }));
+  render(<UpdatePanel />);
+  fireEvent.click(await screen.findByRole("button", { name: /關於與更新/ }));
+  fireEvent.click(screen.getByRole("button", { name: "開啟更新紀錄" }));
+  expect(window.pywebview!.api.open_update_logs).toHaveBeenCalledOnce();
+  expect(await screen.findByRole("alert")).toHaveTextContent("無法開啟更新紀錄");
+  expect(screen.getByRole("button", { name: "開啟更新紀錄" })).toBeEnabled();
+});

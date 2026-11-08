@@ -8,5 +8,8 @@ interface Window {
     check_update(channel: string): Promise<import("./UpdatePanel").UpdateState | { error: string }>;
     download_update(): Promise<import("./UpdatePanel").UpdateState | { error: string }>;
     install_update(dirty: boolean, saving: boolean): Promise<{ ok: boolean } | { error: string }>;
+    read_clipboard_images?(): Promise<{ images: Array<{ name: string; mime: string; data: string }> } | { error: string }>;
+    update_diagnostics?(): Promise<Record<string, unknown>>;
+    open_update_logs?(): Promise<{ ok: boolean } | { error: string }>;
   } };
 }

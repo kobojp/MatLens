@@ -12,7 +12,10 @@ export type UpdateState = {
   executable?: string;
   database?: string;
   installation_mode?: string;
-  last_result?: { ok: boolean; message: string };
+  job_id?: string;
+  log_directory?: string;
+  log_error?: string;
+  last_result?: { ok: boolean; message: string; failed_stage?: string; job_id?: string };
 };
 
 export default function UpdatePanel({ onInstalling }: { onInstalling?: (value: boolean) => void }) {
@@ -21,6 +24,7 @@ export default function UpdatePanel({ onInstalling }: { onInstalling?: (value: b
   const [channel, setChannel] = useState("stable");
   const [error, setError] = useState("");
   const [installing, setInstalling] = useState(false);
+  const [diagnostics, setDiagnostics] = useState("");
   const initialized = useRef(false);
 
   useEffect(() => {
@@ -100,6 +104,16 @@ export default function UpdatePanel({ onInstalling }: { onInstalling?: (value: b
           {state.installation_mode && <p>執行方式：{({ installed: "正式安裝", legacy: "舊路徑安裝", portable: "可攜版", development: "開發版" } as Record<string, string>)[state.installation_mode] || state.installation_mode}</p>}
           {state.executable && <p className="database-location">程式位置：{state.executable}</p>}
           {state.database && <p className="database-location">資料庫：{state.database}</p>}
+          {state.log_directory && <p className="database-location">更新紀錄：{state.log_directory}</p>}
+          {window.pywebview?.api.open_update_logs && <button type="button" className="button secondary"
+            onClick={async () => {
+              setError("");
+              try {
+                const result = await window.pywebview!.api.open_update_logs!();
+                if ("error" in result) setError(result.error);
+              } catch { setError("無法開啟更新紀錄，請稍後重試。"); }
+            }}>開啟更新紀錄</button>}
+          {state.log_error && <p role="alert">{state.log_error}</p>}
           <label>更新頻道
             <select aria-label="更新頻道" value={channel} disabled={busy || installing}
               onChange={(event) => setChannel(event.target.value)}>
@@ -118,6 +132,13 @@ export default function UpdatePanel({ onInstalling }: { onInstalling?: (value: b
             onClick={() => action("install")}>安裝並重新啟動</button>}
           {error && <p role="alert">{error}</p>}
           {state.last_result && <p role={state.last_result.ok ? undefined : "alert"}>上次更新：{state.last_result.message}</p>}
+          {state.last_result?.failed_stage && <p>失敗階段：{({ verify: "驗證更新", wait: "等待程式關閉", backup: "資料庫備份", preflight: "新版預先測試", prepare: "準備檔案", replace: "替換程式", startup: "新版啟動" } as Record<string, string>)[state.last_result.failed_stage] || state.last_result.failed_stage}</p>}
+          {(state.last_result?.job_id || state.job_id) && <p>更新工作：{state.last_result?.job_id || state.job_id}</p>}
+          {window.pywebview?.api.update_diagnostics && <button type="button" onClick={async () => {
+            try { setDiagnostics(JSON.stringify(await window.pywebview!.api.update_diagnostics!(), null, 2)); }
+            catch { setError("無法讀取更新診斷，請查看本機 updates 紀錄。"); }
+          }}>查看更新診斷</button>}
+          {diagnostics && <div><p>診斷只在本機顯示，分享前請遮蔽使用者路徑。</p><pre className="update-diagnostics" tabIndex={0}>{diagnostics}</pre></div>}
           <p>更新不會上傳或移動照片；安裝前會備份案件資料庫。</p>
         </div>
       )}

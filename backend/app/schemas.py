@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 
 class CaseCreate(BaseModel):
@@ -32,6 +32,26 @@ class CaseCreate(BaseModel):
 
 class StorageSettingsUpdate(BaseModel):
     path: str = Field(min_length=1, max_length=500)
+
+
+class UIPreferences(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    layout: Literal["classic", "tiles"] = "tiles"
+    panel_position: Literal["right", "top"] = "right"
+    tile_size: Literal["medium", "large"] = "large"
+    panel_collapsed: StrictBool = False
+
+
+class StorageSelection(BaseModel):
+    path: str = Field(min_length=1, max_length=1000)
+    subfolder: str = Field(default="", max_length=80)
+    with_date: StrictBool = True
+
+    @field_validator("path", "subfolder")
+    @classmethod
+    def strip_selection(cls, value: str) -> str:
+        return value.strip()
 
 
 class StorageFoldersCreate(BaseModel):

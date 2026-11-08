@@ -25,7 +25,9 @@ describe("照片拖放", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      const payload = init?.method === "DELETE"
+      const payload = url.includes("settings/ui-preferences")
+        ? { layout: "classic", panel_position: "right", tile_size: "large", panel_collapsed: false }
+        : init?.method === "DELETE"
         ? { type: "material", value: "消防泵" }
         : url.endsWith("reference-values/material")
         ? { type: "material", value: "消防泵" }
@@ -33,6 +35,10 @@ describe("照片拖放", () => {
           ? { type: "issue", value: "壓力不足" }
           : url.includes("reference-values")
             ? references
+            : url.includes("settings/storage-selection")
+              ? { path: "C:\\MatLens照片", subfolder: "底座", with_date: true }
+              : url.includes("settings/storage/scan")
+                ? { root: "C:\\MatLens照片", subfolders: ["底座", "探頭"] }
             : url.includes("settings/storage/tree")
               ? storageTree
               : url.includes("settings/storage")
@@ -108,6 +114,8 @@ describe("照片拖放", () => {
       const url = String(input);
       let payload: object;
       if (url.includes("reference-values")) payload = references;
+      else if (url.includes("settings/storage-selection")) payload = { path: "C:\\MatLens照片", subfolder: "底座", with_date: true };
+      else if (url.includes("settings/storage/scan")) payload = { root: "C:\\MatLens照片", subfolders: ["底座"] };
       else if (url.includes("settings/storage/tree")) payload = storageTree;
       else if (url.includes("settings/storage")) payload = { path: "C:\\MatLens照片" };
       else if (url.includes("cases/rescan")) {
@@ -182,10 +190,10 @@ describe("照片拖放", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
 
-    fireEvent.click(screen.getByRole("tab", { name: "自由路徑" }));
+    await screen.findByRole("radio", { name: "底座" });
     fireEvent.change(screen.getByLabelText("掃描路徑"), { target: { value: "C:\\現場照片" } });
     fireEvent.click(screen.getByRole("button", { name: "掃描" }));
-    await screen.findByRole("radio", { name: "底座" });
+    fireEvent.click(await screen.findByRole("radio", { name: "底座" }));
     fireEvent.click(screen.getByRole("button", { name: "掃描目前資料夾" }));
 
     await screen.findByText("掃描完成，已新增 69 筆案件。");
@@ -353,8 +361,9 @@ describe("照片拖放", () => {
     expect(customMaterial).toHaveAttribute("aria-pressed", "true");
   });
 
-  it.each(["month", "free", "free_without_date"])("自訂材料會顯示在案件資料夾預覽（%s）", async (mode) => {
+  it.each([true, false])("自訂材料會顯示在案件資料夾預覽（日期前綴：%s）", async (withDate) => {
     render(<App />);
+    await screen.findByRole("radio", { name: "底座" });
     fireEvent.change(screen.getByLabelText("維修日期"), { target: { value: "2026-10-06" } });
     fireEvent.change(screen.getByLabelText("棟別"), { target: { value: "長青" } });
     fireEvent.change(screen.getByLabelText("樓層"), { target: { value: "3F" } });
@@ -364,26 +373,8 @@ describe("照片拖放", () => {
     fireEvent.change(screen.getByLabelText("自訂材料名稱"), { target: { value: "消防泵" } });
     fireEvent.click(screen.getByRole("button", { name: "加入材料" }));
     expect(await screen.findByRole("button", { name: "消防泵" })).toHaveAttribute("aria-pressed", "true");
-
-    if (mode !== "month") {
-      const originalFetch = globalThis.fetch;
-      vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => (
-        String(input).includes("settings/storage/scan")
-          ? { ok: true, json: async () => ({ root: "C:\\現場照片", subfolders: ["其他設備"] }) } as Response
-          : originalFetch(input, init)
-      )));
-      fireEvent.click(screen.getByRole("tab", { name: "自由路徑" }));
-      fireEvent.change(screen.getByLabelText("掃描路徑"), { target: { value: "C:\\現場照片" } });
-      fireEvent.click(screen.getByRole("button", { name: "掃描" }));
-      await screen.findByRole("radio", { name: "其他設備" });
-      if (mode === "free_without_date") {
-        fireEvent.click(screen.getByRole("checkbox", { name: "加入今日日期前綴" }));
-      }
-    }
-
-    const name = mode === "free_without_date"
-      ? /\\長青3F M3-07 消防泵 故障$/
-      : /\\2026-10-06 長青3F M3-07 消防泵 故障$/;
+    if (!withDate) fireEvent.click(screen.getByRole("checkbox", { name: "加入日期前綴" }));
+    const name = withDate ? /\\2026-10-06 長青3F M3-07 消防泵 故障$/ : /\\長青3F M3-07 消防泵 故障$/;
     expect(await screen.findAllByText(name)).toHaveLength(2);
     fireEvent.click(screen.getByRole("button", { name: "底座" }));
     expect(screen.getAllByText(/長青3F M3-07 底座 故障$/)).toHaveLength(2);
@@ -407,55 +398,26 @@ describe("照片拖放", () => {
     expect(screen.getByRole("button", { name: "底座" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("依日期預選月份並列出掃描到的子目錄", async () => {
+  it("新增案件只列出一般子資料夾，不再依日期建立月份目錄", async () => {
     render(<App />);
-
-    await waitFor(() => (
-      expect(screen.getByRole("combobox", { name: "月份資料夾" })).toHaveValue(currentMonth)
-    ));
-    expect(screen.getByRole("combobox", { name: "儲存子目錄" })).toHaveValue("底座");
-    expect(screen.getAllByText(new RegExp(`${currentMonth}\\\\底座`))).toHaveLength(2);
+    expect(await screen.findByRole("radio", { name: "底座" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "探頭" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("維修日期"), { target: { value: "2027-01-02" } });
+    expect(screen.queryByRole("combobox", { name: "月份資料夾" })).not.toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("storage/tree"))).toBe(false);
+    expect(screen.getByRole("radio", { name: "底座" })).toBeChecked();
   });
 
-  it("月份不存在時可批次建立常用與自訂子目錄", async () => {
-    const missingMonthNumber = new Date().getMonth() === 9 ? 11 : 10;
-    const missingMonth = `${missingMonthNumber}月`;
-    const missingMonthDate = `2026-${missingMonthNumber}-05`;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      const requestedMonth = url.includes(missingMonthDate) ? missingMonth : currentMonth;
-      const isCreated = fetchMock.mock.calls.some(([, options]) => options?.method === "POST");
-      const payload = url.includes("reference-values")
-        ? references
-        : url.includes("settings/storage/tree")
-          ? {
-              root: "C:\\MatLens照片",
-              target_month: requestedMonth,
-              month_exists: requestedMonth !== missingMonth || isCreated,
-              months: requestedMonth === missingMonth && !isCreated
-                ? storageTree.months
-                : [...storageTree.months, { name: missingMonth, subfolders: ["底座", "探頭", "模組"] }],
-            }
-          : url.endsWith("settings/storage/folders")
-            ? { root: "C:\\MatLens照片", month: { name: missingMonth, subfolders: ["底座", "探頭", "模組"] } }
-            : url.includes("settings/storage")
-              ? { path: "C:\\MatLens照片" }
-              : { items: [], total: 0, page: 1, page_size: 20, pages: 1 };
-      return { ok: true, json: async () => payload } as Response;
-    });
-    vi.stubGlobal("fetch", fetchMock);
+  it("空根目錄提示建立子資料夾，不自行建立或選擇目的地", async () => {
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => (
+      String(input).includes("settings/storage/scan")
+        ? { ok: true, json: async () => ({ root: "C:\\MatLens照片", subfolders: [] }) } as Response
+        : originalFetch(input, init)
+    )));
     render(<App />);
-
-    fireEvent.change(screen.getByLabelText("維修日期"), { target: { value: missingMonthDate } });
-    expect(await screen.findByText(new RegExp(`找不到「${missingMonth}」資料夾`))).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("自訂子目錄名稱"), { target: { value: "模組" } });
-    fireEvent.click(screen.getByRole("button", { name: `建立 ${missingMonth}與子目錄` }));
-
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "儲存子目錄" })).toHaveValue("模組"));
-    const createCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("settings/storage/folders"));
-    expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({
-      month: missingMonth,
-      subfolders: ["底座", "探頭", "模組"],
-    });
+    expect(await screen.findByText(/此路徑沒有子目錄/)).toBeInTheDocument();
+    expect(screen.getByText("尚未確認儲存資料夾")).toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("storage/folders"))).toBe(false);
   });
 });

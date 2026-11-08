@@ -44,7 +44,9 @@ from .schemas import (
     OverviewExport,
     RoleOrderSetting,
     StorageFoldersCreate,
+    StorageSelection,
     StorageSettingsUpdate,
+    UIPreferences,
 )
 from .storage import (
     DuplicatePhotoError,
@@ -196,6 +198,64 @@ def create_app(
     def get_free_scan_path() -> dict[str, str]:
         return {"path": get_setting(app.state.database_path, "free_scan_path", "")}
 
+    @app.get("/api/settings/ui-preferences", response_model=UIPreferences)
+    def ui_preferences() -> UIPreferences:
+        saved = get_setting(app.state.database_path, "ui_preferences")
+        try:
+            return UIPreferences.model_validate_json(saved) if saved else UIPreferences()
+        except ValidationError as error:
+            raise HTTPException(
+                status_code=500, detail="介面設定損壞，請至設定頁恢復預設版面"
+            ) from error
+
+    @app.post("/api/settings/ui-preferences", response_model=UIPreferences)
+    def save_ui_preferences(preferences: UIPreferences) -> UIPreferences:
+        try:
+            set_setting(app.state.database_path, "ui_preferences", preferences.model_dump_json())
+        except sqlite3.Error as error:
+            raise HTTPException(
+                status_code=500, detail="介面設定無法儲存，請確認資料庫可寫入"
+            ) from error
+        return preferences
+
+    @app.get("/api/settings/storage-selection")
+    def storage_selection() -> dict[str, object]:
+        saved = get_setting(app.state.database_path, "storage_selection")
+        if saved:
+            try:
+                return StorageSelection.model_validate_json(saved).model_dump()
+            except ValidationError as error:
+                raise HTTPException(
+                    status_code=500, detail="儲存位置設定損壞，請重新選擇並儲存"
+                ) from error
+        legacy = get_setting(app.state.database_path, "free_scan_path")
+        return {"path": str(Path(legacy).resolve() if legacy else active_storage_root()),
+                "subfolder": "", "with_date": True}
+
+    @app.post("/api/settings/storage-selection")
+    def save_storage_selection(settings: StorageSelection) -> dict[str, object]:
+        root = Path(settings.path).expanduser()
+        if not root.is_absolute():
+            raise HTTPException(status_code=422, detail="儲存目錄必須使用完整路徑")
+        try:
+            root = root.resolve()
+            scan_directory_subfolders(root)
+            if settings.subfolder:
+                resolve_free_destination(root, settings.subfolder)
+        except (StorageError, OSError) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        value = {"path": str(root), "subfolder": settings.subfolder,
+                 "with_date": settings.with_date}
+        # Keep older clients' default-root settings consistent in the same transaction.
+        with connect(app.state.database_path) as connection:
+            connection.executemany(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [("storage_selection", json.dumps(value, ensure_ascii=False)),
+                 ("storage_root", str(root)), ("free_scan_path", str(root))],
+            )
+        return value
+
     @app.post("/api/settings/free-scan-path")
     def save_free_scan_path(settings: StorageSettingsUpdate) -> dict[str, str]:
         path = settings.path.strip()
@@ -235,7 +295,18 @@ def create_app(
 
 
     @app.post("/api/settings/storage/pick-folder")
-    def pick_storage_folder() -> dict[str, object]:
+    def pick_storage_folder(persist: bool = Query(default=True)) -> dict[str, object]:
+        def accept_selected(selected: str) -> str:
+            if persist:
+                return str(configure_storage_root(selected))
+            candidate = Path(selected).expanduser()
+            if not candidate.is_absolute():
+                raise HTTPException(status_code=422, detail="儲存目錄必須使用完整路徑")
+            try:
+                return str(scan_directory_subfolders(candidate)["root"])
+            except StorageError as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
+
         if folder_picker is not None:
             try:
                 selected = folder_picker(str(active_storage_root()))
@@ -243,7 +314,7 @@ def create_app(
                 raise HTTPException(status_code=500, detail="無法開啟資料夾選擇器") from error
             if not selected:
                 return {"path": str(active_storage_root()), "cancelled": True}
-            return {"path": str(configure_storage_root(selected)), "cancelled": False}
+            return {"path": accept_selected(selected), "cancelled": False}
         if os.name != "nt":
             raise HTTPException(status_code=501, detail="資料夾選擇器僅支援 Windows")
         environment = os.environ.copy()
@@ -278,7 +349,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         selected = result.stdout.strip()
         if not selected:
             return {"path": str(active_storage_root()), "cancelled": True}
-        return {"path": str(configure_storage_root(selected)), "cancelled": False}
+        return {"path": accept_selected(selected), "cancelled": False}
 
     @app.get("/api/cases")
     def cases_index(
