@@ -95,3 +95,23 @@ setuptools 至 84.2.1，以及 Vite／Vitest 與受影響前端間接依賴；�
 重新執行 199 項 pytest、72 項 Vitest、Ruff 及前端建置，npm audit 為零告警。
 新安裝包使用更新後依賴重新打包，來源／EXE／安裝與升級報告以 `release-0.5.7-secure-*` 區分，
 正式附件不沿用補修前的二進位檔或簽章。
+
+## 2026-11-11 公開發布驗證
+
+[v0.5.7](https://github.com/kobojp/MatLens/releases/tag/v0.5.7) 已公開並設為 latest，
+tag 與已驗證的程式來源皆為 `11ea6c1789cb09341b0a5cba4cfa41e6813abde1`。
+199 項 pytest、72 項 Vitest、Ruff、前端建置、來源／EXE／安裝自測及兩種路徑的原版 0.5.6 更新器隔離升級皆通過，
+受控更新失敗留下 log 且保留程式、資料與照片。既有告警所列的 56 個修補版本要求已逐一核對符合；npm audit 零告警。
+
+公開檢查實際以未登入的正常 `releases/latest/download` 下載四個附件，驗證 Ed25519、版本、平台、大小及 SHA-256，
+並以正常 UpdateService 確認版本。首次因舊快取失敗，未修改已公開附件，等待後通過。
+最終報告 `build/release-0.5.7-secure-public-complete.json`，初次失敗證據另留於 build。
+
+| 正式附件 | SHA-256 |
+| --- | --- |
+| MatLens-Setup-0.5.7-x64.exe | `8cbb1038da580b05ffd340195c5722eaa189aca535f87321ea76500ff205df77` |
+| MatLens-0.5.7-win-x64.zip | `492bd3f428e5fc9dd2784c2bb763f8b98504f9836e2c98b9719ef17536bf74e1` |
+| MatLens-0.5.7-update-win-x64.zip | `e4c323a0cf106b50a745b399581dc2f22dbc040896d9428d4f56a70bfb264219` |
+| stable.json | `23b1cffb1e380c897c0b1735c4dff515685e61c23fcbe5d854d5936254739ef2` |
+
+主專案分支、來源、前端及本機正式附件已同步；先前同版本測試版需執行正式 Setup，不能依相同版本號自動升級。
