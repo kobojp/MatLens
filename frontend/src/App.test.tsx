@@ -25,7 +25,8 @@ describe("照片拖放", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      const payload = url.includes("settings/ui-preferences")
+      const payload = url.includes("settings/fire-naming") ? { include_material: true }
+        : url.includes("settings/ui-preferences")
         ? { layout: "classic", panel_position: "right", tile_size: "large", panel_collapsed: false }
         : init?.method === "DELETE"
         ? { type: "material", value: "消防泵" }
@@ -244,7 +245,7 @@ describe("照片拖放", () => {
     fireEvent.click(screen.getByRole("button", { name: "火警細項 無回應" }));
     fireEvent.change(screen.getByPlaceholderText("例如 3F、B2"), { target: { value: "1F" } });
     fireEvent.change(screen.getByPlaceholderText("例如 M3-07"), { target: { value: "M3-07" } });
-    expect((await screen.findAllByText(/二門診1F M3-07 底座 火警-無回應/)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/二門診1F M3-07 底座 火警 無回應/)).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: "火警細項 無回應" }));
     expect((await screen.findAllByText(/二門診1F M3-07 底座 火警$/)).length).toBeGreaterThan(0);

@@ -61,9 +61,13 @@ def folder_reference_values(connection: sqlite3.Connection) -> tuple[set[str], s
     materials, issues = set(MATERIALS), set(ISSUES)
     for row in connection.execute("SELECT option_type, value FROM custom_options"):
         (materials if row["option_type"] == "material" else issues).add(row["value"])
+    for row in connection.execute("SELECT value FROM fire_detail_options"):
+        issues.add(row["value"])
     for row in connection.execute("SELECT DISTINCT material, issues_json FROM cases"):
         materials.add(row["material"])
-        issues.add("-".join(json.loads(row["issues_json"])))
+        values = json.loads(row["issues_json"])
+        issues.update(values)
+        issues.add("-".join(values))
     return materials, issues
 
 
@@ -92,8 +96,20 @@ def _case_from_folder(
             sanitize_component(name) for name in [*MATERIALS, *material_names, material]
         }
         known_issues = {sanitize_component(name) for name in [*ISSUES, *issue_names]}
-        known_issues.update(f"火警-{name}" for name in list(known_issues) if name != "火警")
-        if issue_text not in known_issues:
+        details = list(known_issues)
+        known_issues.update(f"火警{separator}{name}" for name in details
+                            if name != "火警" for separator in ["-", " "])
+        candidates = []
+        for name in known_materials:
+            if issue_text.startswith(f"{name} "):
+                suffix = issue_text[len(name) + 1:]
+                if suffix in known_issues or suffix.startswith(("火警 ", "火警-")):
+                    candidates.append((name, suffix))
+        if len(candidates) > 1 or (candidates and issue_text.startswith(("火警 ", "火警-"))):
+            return None
+        if len(candidates) == 1:
+            material, issue_text = candidates[0]
+        if issue_text not in known_issues and not issue_text.startswith(("火警 ", "火警-")):
             for name in sorted(known_materials, key=len, reverse=True):
                 if issue_text.startswith(f"{name} "):
                     material, issue_text = name, issue_text[len(name) + 1 :]
@@ -103,7 +119,10 @@ def _case_from_folder(
                     if issue_text.endswith(f" {name}"):
                         material, issue_text = issue_text[: -len(name) - 1], name
                         break
-        issues = [item for item in issue_text.split("-") if item]
+        if issue_text.startswith(("火警 ", "火警-")):
+            issues = ["火警", issue_text[3:].strip()]
+        else:
+            issues = [issue_text] if issue_text else []
         if not issues:
             return None
         return CaseCreate(

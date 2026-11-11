@@ -27,12 +27,17 @@ def completeness(roles: list[str]) -> dict[str, object]:
     return {"is_complete": not missing, "missing_roles": missing}
 
 
-def _case_folder_name(case: CaseCreate, *, include_date: bool = True) -> str:
-    issue_text = "-".join(case.issues)
+def _case_folder_name(case: CaseCreate, *, include_date: bool = True,
+                      include_material: bool = True, issue_separator: str = " ") -> str:
+    issue_text = issue_separator.join(case.issues)
     parts = [
         sanitize_component(case.building) + sanitize_component(case.floor),
         sanitize_component(case.address_code),
-        sanitize_component(case.material),
+        *(
+            [sanitize_component(case.material)]
+            if include_material or case.issues[0] != "火警"
+            else []
+        ),
         sanitize_component(issue_text),
     ]
     if include_date:
@@ -47,8 +52,9 @@ def _available_case_path(
     database_path: Path,
     *,
     include_date: bool = True,
+    include_material: bool = True,
 ) -> Path:
-    name = _case_folder_name(case, include_date=include_date)
+    name = _case_folder_name(case, include_date=include_date, include_material=include_material)
     candidate = destination / name
     suffix = 2
     with connect(database_path) as connection:
@@ -111,6 +117,7 @@ async def create_case(
     free_mode: bool = False,
     include_date: bool = True,
     name_with_sequence: bool = False,
+    include_material: bool = True,
 ) -> dict[str, object]:
     if not uploads:
         raise StorageError("至少需要一張照片")
@@ -193,7 +200,8 @@ async def create_case(
             item["stored_name"] = stored_name
 
         final_dir = _available_case_path(
-            photo_root, destination, case, database_path, include_date=include_date
+            photo_root, destination, case, database_path, include_date=include_date,
+            include_material=include_material
         )
         final_dir.parent.mkdir(parents=True, exist_ok=True)
         os.replace(staging_dir, final_dir)
@@ -212,6 +220,11 @@ async def create_case(
                     folder_path=relative_folder,
                     photo_count=len(staged),
                     created_at=created_at,
+                )
+                connection.execute(
+                    "UPDATE cases SET app_managed=1, naming_json=? WHERE id=?",
+                    (json.dumps({"include_date": include_date, "include_material": include_material,
+                                 "separator": " "}), case_id),
                 )
                 for sequence, (item, role) in enumerate(
                     zip(staged, roles, strict=True), start=1

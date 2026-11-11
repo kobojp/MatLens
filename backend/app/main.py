@@ -38,7 +38,9 @@ from .overview import (
 )
 from .schemas import (
     CaseCreate,
+    CaseEdit,
     CustomOptionCreate,
+    FireNamingSetting,
     NameSequenceSetting,
     OverviewAutoScan,
     OverviewExport,
@@ -61,6 +63,7 @@ from .storage import (
     scan_directory_subfolders,
     scan_storage_tree,
 )
+from .storage.editing import EditConflict, edit_detail, preview_edit, recover_edits, update_case
 
 
 def create_app(
@@ -71,6 +74,7 @@ def create_app(
     folder_picker: Callable[[str], str | None] | None = None,
 ) -> FastAPI:
     initialize(database_path)
+    recover_edits(database_path)
     photo_root.mkdir(parents=True, exist_ok=True)
 
     app = FastAPI(title="MatLens API", version="0.1.0")
@@ -117,7 +121,18 @@ def create_app(
         custom_issues = [
             row["value"] for row in custom_rows if row["option_type"] == "issue"
         ]
+        with connect(app.state.database_path) as connection:
+            fire_custom = [
+                row["value"]
+                for row in connection.execute(
+                    "SELECT value FROM fire_detail_options ORDER BY created_at, value"
+                )
+            ]
+        fire_defaults = [value for value in ISSUES if value != "火警"]
+        fire_custom = [value for value in fire_custom if value not in fire_defaults]
         return {
+            "fire_details": [*fire_defaults, *fire_custom],
+            "custom_fire_details": fire_custom,
             "buildings": BUILDINGS,
             "materials": [*MATERIALS, *custom_materials],
             "issues": [*ISSUES, *custom_issues],
@@ -128,14 +143,34 @@ def create_app(
 
     @app.post("/api/reference-values/{option_type}", status_code=201)
     def add_reference_value(
-        option_type: Literal["material", "issue"],
+        option_type: Literal["material", "issue", "fire-detail"],
         option: CustomOptionCreate,
     ) -> dict[str, str]:
-        defaults = MATERIALS if option_type == "material" else ISSUES
+        if option_type == "fire-detail" and (
+            option.value == "火警" or any(char in option.value for char in '<>:"/\\|?*')
+        ):
+            raise HTTPException(
+                status_code=422, detail="火警細項名稱不正確，不能使用火警本身或路徑字元"
+            )
+        defaults = (
+            MATERIALS
+            if option_type == "material"
+            else (
+                [value for value in ISSUES if value != "火警"]
+                if option_type == "fire-detail"
+                else ISSUES
+            )
+        )
         if option.value.casefold() in {value.casefold() for value in defaults}:
             raise HTTPException(status_code=409, detail="此選項已存在")
         try:
             with connect(app.state.database_path) as connection:
+                if option_type == "fire-detail":
+                    connection.execute(
+                        "INSERT INTO fire_detail_options(value,created_at) VALUES (?,?)",
+                        (option.value, datetime.now(UTC).isoformat()),
+                    )
+                    return {"type": option_type, "value": option.value}
                 connection.execute(
                     """
                     INSERT INTO custom_options (option_type, value, created_at)
@@ -151,10 +186,17 @@ def create_app(
 
     @app.delete("/api/reference-values/{option_type}")
     def delete_reference_value(
-        option_type: Literal["material", "issue"],
+        option_type: Literal["material", "issue", "fire-detail"],
         option: CustomOptionCreate,
     ) -> dict[str, str]:
         with connect(app.state.database_path) as connection:
+            if option_type == "fire-detail":
+                result = connection.execute(
+                    "DELETE FROM fire_detail_options WHERE value=?", (option.value,)
+                )
+                if result.rowcount == 0:
+                    raise HTTPException(status_code=404, detail="只能刪除自訂火警細項")
+                return {"type": option_type, "value": option.value}
             result = connection.execute(
                 "DELETE FROM custom_options WHERE option_type = ? AND value = ?",
                 (option_type, option.value),
@@ -388,6 +430,67 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         except StorageError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
 
+    @app.get("/api/settings/fire-naming")
+    def fire_naming() -> dict:
+        return {"include_material": get_setting(database_path, "fire_include_material", "1") == "1"}
+
+    @app.post("/api/settings/fire-naming")
+    def save_fire_naming(settings: FireNamingSetting) -> dict:
+        try:
+            set_setting(
+                database_path, "fire_include_material", "1" if settings.include_material else "0"
+            )
+        except sqlite3.Error as error:
+            raise HTTPException(status_code=500, detail="火警命名設定保存失敗，請重試") from error
+        return settings.model_dump()
+
+    def edit_call(action, *args):
+        try:
+            return action(database_path, *args, photo_root)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="找不到案件") from error
+        except EditConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except (StorageError, OSError, sqlite3.Error) as error:
+            raise HTTPException(status_code=400, detail=f"無法更新案件：{error}") from error
+
+    @app.get("/api/cases/{case_id}/edit")
+    def case_edit_detail(case_id: str) -> dict:
+        return edit_call(edit_detail, case_id)
+
+    @app.post("/api/cases/{case_id}/edit-preview")
+    def case_edit_preview(case_id: str, change: CaseEdit) -> dict:
+        return edit_call(preview_edit, case_id, change)
+
+    @app.put("/api/cases/{case_id}")
+    def case_edit_save(case_id: str, change: CaseEdit) -> dict:
+        if change.photos is not None:
+            raise HTTPException(status_code=422, detail="照片變更請使用主工作區儲存")
+        return edit_call(update_case, case_id, change)
+
+    @app.post("/api/cases/{case_id}/save")
+    async def case_workspace_save(
+        case_id: str, change: str = Form(...), photos: list[UploadFile] | None = File(default=None),
+    ) -> dict:
+        from .storage.workspace_edit import save_workspace
+        try:
+            parsed = CaseEdit.model_validate_json(change)
+        except ValidationError as error:
+            raise HTTPException(status_code=422, detail="案件或照片更正資料不正確") from error
+        try:
+            return await save_workspace(database_path, case_id, parsed, photo_root, photos or [])
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="找不到案件") from error
+        except EditConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except DuplicatePhotoError as error:
+            raise HTTPException(
+                status_code=409,
+                detail={"message": "更正包含其他案件的重複照片", "duplicates": error.duplicates},
+            ) from error
+        except (StorageError, OSError, sqlite3.Error) as error:
+            raise HTTPException(status_code=400, detail=f"無法儲存案件更正：{error}") from error
+
     @app.get("/api/cases/{case_id}")
     def case_detail(case_id: str) -> dict[str, object]:
         try:
@@ -411,6 +514,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         free_scan_root: str = Form(default=""),
         free_with_date: str = Form(default="true"),
         name_with_sequence: str = Form(default=""),
+        fire_include_material: bool = Form(default=True),
         photos: list[UploadFile] = File(...),
     ) -> dict[str, object]:
         try:
@@ -470,6 +574,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
                 free_mode=use_free_mode,
                 include_date=include_date,
                 name_with_sequence=use_sequence,
+                include_material=fire_include_material,
             )
         except DuplicatePhotoError as error:
             raise HTTPException(

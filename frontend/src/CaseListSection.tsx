@@ -20,6 +20,9 @@ type Props = {
   onRescan: () => void;
   onOpenOverview: (view: "gallery" | "names") => void;
   onView: (id: string) => void;
+  onEdit: (id: string) => void;
+  editingDisabled?: boolean;
+  rescanDisabled?: boolean;
   onOpenFolder: (id: string) => void;
 };
 
@@ -31,7 +34,7 @@ export default function CaseListSection(props: Props) {
         <div><span className="eyebrow">ARCHIVE</span><h2>案件清單</h2><p>依棟別、定址碼、材料或問題快速尋找</p></div>
         <div className="list-filters">
           <button type="button" className="database-open" onClick={props.onOpenDatabaseFolder}>開啟資料庫位置</button>
-          <button type="button" className="rescan-cases" onClick={props.onRescan} disabled={scanning}>
+          <button type="button" className="rescan-cases" onClick={props.onRescan} disabled={scanning || props.rescanDisabled}>
             {scanning ? "掃描中…" : "掃描目前資料夾"}
           </button>
           <button type="button" className="overview-open" onClick={() => props.onOpenOverview("gallery")}>
@@ -57,7 +60,7 @@ export default function CaseListSection(props: Props) {
                 <td>{item.work_date}</td><td><strong>{item.building}</strong> {item.floor}</td><td><code>{item.address_code}</code></td>
                 <td><strong>{item.material}</strong><span className="issue-summary">{item.issues.join("／")}</span></td><td>{item.photo_count} 張</td>
                 <td><span className={`status ${item.is_complete ? "complete" : "incomplete"}`}>{item.is_complete ? "完整" : `缺 ${item.missing_roles.join("、")}`}</span></td>
-                <td className="row-actions"><button type="button" onClick={() => props.onView(item.id)}>檢視</button><button type="button" onClick={() => props.onOpenFolder(item.id)}>開啟資料夾</button></td>
+                <td className="row-actions"><button type="button" aria-label={`編輯案件 ${item.address_code}`} disabled={props.editingDisabled} onClick={() => props.onEdit(item.id)}>編輯</button><button type="button" onClick={() => props.onView(item.id)}>檢視</button><button type="button" onClick={() => props.onOpenFolder(item.id)}>開啟資料夾</button></td>
               </tr>
             ))}
           </tbody>

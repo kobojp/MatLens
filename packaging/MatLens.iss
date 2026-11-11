@@ -8,7 +8,7 @@
 [Setup]
 AppId={#ProductId}
 AppName=MatLens
-AppVersion=0.5.6
+AppVersion=0.5.7
 DefaultDirName={localappdata}\MatLens
 DefaultGroupName=MatLens
 UsePreviousAppDir=no
@@ -21,7 +21,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 OutputDir=..\dist\installer
 #ifndef SmokeRoot
-OutputBaseFilename=MatLens-Setup-0.5.6-x64
+OutputBaseFilename=MatLens-Setup-0.5.7-x64
 #else
 OutputBaseFilename=MatLens-Setup-Smoke
 #endif

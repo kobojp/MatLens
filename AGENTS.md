@@ -12,7 +12,7 @@ MatLens 是供 Windows 10／11 使用的消防材料更換照片整理與案件�
 
 - 原始碼倉庫：公開 `https://github.com/kobojp/MatLens`。
 - Windows 安裝包與線上更新檔：同一倉庫的 GitHub Releases。
-- 目前正式版本：`v0.5.6`；版本唯一來源為 `desktop/version.py`。
+- 目前版本：`v0.5.7`；版本唯一來源為 `desktop/version.py`。
 - 舊倉庫 `kobojp/MatLens-Releases` 已於 2026-10-05 刪除，不再有過渡入口。
   仍停在 v0.3.0 的安裝無法自動更新，需手動安裝新版完整 ZIP 一次。
 - 所有更新檔只放在 `kobojp/MatLens` 的 GitHub Releases。
@@ -182,7 +182,7 @@ PowerShell -ExecutionPolicy Bypass -File .\packaging\build.ps1
 - 介面文字使用台灣繁體中文，操作應適合現場快速整理照片。
 - 保持鍵盤、滑鼠與拖放操作可用，互動元件提供可辨識的 accessible name。
 - 照片預覽建立的 object URL 必須在移除照片或卸載時釋放。
-- 自訂材料／問題可以新增和刪除；問題為單選，僅「火警」可再選一個細項（例：火警-無回應）。
+- 自訂材料／問題可以新增和刪除；問題為單選，僅「火警」可再選一個細項（例：火警 無回應）。
 - 本次照片的角色預設順序由使用者在畫面上拖曳設定並存入資料庫，不得寫死。
 - 縮圖可拖曳排序；排序只改順序，角色留在原照片上。拖曳縮圖不得被當成新增檔案。
 - 自訂選項刪除前必須確認，並提示既有案件不受影響。

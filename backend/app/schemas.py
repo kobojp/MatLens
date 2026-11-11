@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 
 class CaseCreate(BaseModel):
@@ -28,6 +28,48 @@ class CaseCreate(BaseModel):
         if not cleaned:
             raise ValueError("至少選擇一個問題")
         return cleaned
+
+
+class FireNamingSetting(BaseModel):
+    include_material: StrictBool = True
+
+
+class CaseEditPhoto(BaseModel):
+    photo_id: str | None = Field(default=None, min_length=1, max_length=80)
+    upload_index: int | None = Field(default=None, ge=0, le=29, strict=True)
+    role: str
+
+    @model_validator(mode="after")
+    def validate_selection(self):
+        from .config import PHOTO_ROLES
+
+        if (self.photo_id is None) == (self.upload_index is None) or self.role not in PHOTO_ROLES:
+            raise ValueError("照片來源或角色不正確")
+        return self
+
+
+class CaseEdit(CaseCreate):
+    token: str = Field(min_length=64, max_length=64)
+    apply_naming: StrictBool = False
+    include_material: StrictBool = True
+    include_date: StrictBool = True
+    confirm_managed: StrictBool = False
+    name_with_sequence: StrictBool = False
+    photos: list[CaseEditPhoto] | None = Field(default=None, min_length=1, max_length=30)
+
+    @field_validator("building", "floor", "address_code", "material")
+    @classmethod
+    def required_edit_field(cls, value: str) -> str:
+        if not value:
+            raise ValueError("案件必填欄位不可空白")
+        return value
+
+    @field_validator("issues")
+    @classmethod
+    def single_issue(cls, values: list[str]) -> list[str]:
+        if len(values) != 1 and not (len(values) == 2 and values[0] == "火警"):
+            raise ValueError("問題只能選擇一項，火警可再選一個細項")
+        return values
 
 
 class StorageSettingsUpdate(BaseModel):

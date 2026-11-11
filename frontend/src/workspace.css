@@ -132,3 +132,41 @@
 
 .photo-lightbox > header > div { min-width: 0; }
 .photo-lightbox > header p { overflow-wrap: anywhere; }
+
+.fire-naming { padding: 12px; background: var(--ui-soft, #f6f8fa); margin: 10px 0; border-radius: 8px; }
+.fire-naming small { display: block; margin-top: 6px; }
+.fire-naming input, .edit-check input { margin-right: 8px; }
+/* Existing cases use the same workspace and photo tools as new cases. */
+.workspace-edit-banner { scroll-margin-top: calc(var(--topbar-height, 104px) + 150px); display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 16px 20px; margin-bottom: 12px; border: 1px solid var(--ui-accent, #b34035); border-left-width: 5px; border-radius: 9px; background: var(--ui-soft, #fff3f0); }
+.workspace-edit-banner strong { font-size: 18px; }
+.workspace-edit-banner p { margin: 7px 0; font-size: 13px; }
+.workspace-edit-banner code, .edit-storage-card code { display: block; overflow-wrap: anywhere; }
+.workspace-edit-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.edit-storage-card { border: 1px solid var(--ui-border, #d7e3f3); border-radius: 8px; padding: 12px; margin-bottom: 16px; }
+.edit-storage-card small, .edit-naming-options small { display: block; margin-top: 8px; line-height: 1.6; }
+.edit-naming-options { padding: 12px; border: 1px solid var(--ui-border, #d7e3f3); border-radius: 8px; margin: 10px 0; }
+.edit-naming-options label { display: block; margin: 6px 0; }
+.edit-naming-options input { margin-right: 8px; }
+@media (max-width: 760px) { .workspace-edit-banner { align-items: stretch; flex-direction: column; } .workspace-edit-actions { flex-wrap: wrap; } }
+
+.edit-confirm-backdrop { z-index: 80; padding: 20px; background: #10243d70; }
+.edit-confirmation { display: flex; flex-direction: column; width: min(680px, 100%); max-height: calc(100vh - 40px); max-height: calc(100dvh - 40px); min-width: 0; overflow: hidden; border: 1px solid var(--ui-border, #d4dce3); border-radius: 16px; background: #fff; color: var(--ui-text, #173b49); box-shadow: 0 24px 80px #10243d40; }
+.edit-confirm-header { display: flex; gap: 14px; align-items: center; padding: 24px; border-bottom: 1px solid var(--ui-border, #d4dce3); flex-shrink: 0; }
+.edit-confirm-icon { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; border-radius: 12px; color: var(--ui-accent, #b34035); background: var(--ui-soft, #fff1ef); font-size: 28px; }
+.edit-confirm-header h2 { margin: 0; font-size: 21px; }
+.edit-confirm-header p { margin: 7px 0 0; font-size: 13px; color: var(--ui-muted, #667e89); line-height: 1.6; }
+.edit-confirm-body { min-height: 0; padding: 20px 24px; overflow-y: auto; overscroll-behavior: contain; }
+.edit-confirm-paths { display: grid; gap: 12px; }
+.edit-confirm-path { min-width: 0; padding: 14px 16px; border: 1px solid var(--ui-border, #d4dce3); border-radius: 10px; background: #f8fafc; }
+.edit-confirm-path > span { display: block; margin-bottom: 8px; font-size: 12px; color: var(--ui-muted, #667e89); }
+.edit-confirm-path strong { display: block; line-height: 1.6; font-size: 15px; overflow-wrap: anywhere; }
+.edit-confirm-path code { display: block; margin-top: 8px; font-size: 12px; line-height: 1.7; white-space: normal; overflow-wrap: anywhere; user-select: text; }
+.edit-confirm-path.is-target { border-color: var(--ui-accent, #b34035); background: var(--ui-soft, #fff1ef); }
+.edit-confirm-path.is-target > span { color: var(--ui-accent, #b34035); font-weight: 600; }
+.edit-confirm-photos { padding: 14px 0 0; font-size: 14px; }
+.edit-confirm-photos p { margin: 7px 0 0; line-height: 1.6; }
+.edit-confirm-photos p:last-child, .edit-confirm-hint { color: var(--ui-muted, #667e89); font-size: 13px; }
+.edit-confirm-warning { margin: 16px 0 0; padding: 12px 14px; border: 1px solid #e8c880; border-radius: 8px; color: #78531b; background: #fff8e8; font-size: 13px; line-height: 1.7; }
+.edit-confirm-footer { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 24px; border-top: 1px solid var(--ui-border, #d4dce3); flex-shrink: 0; }
+.edit-confirm-footer .button { min-width: 96px; }
+@media (max-width: 480px) { .edit-confirm-backdrop { padding: 10px; } .edit-confirmation { max-height: calc(100vh - 20px); max-height: calc(100dvh - 20px); } .edit-confirm-header { padding: 18px; gap: 10px; } .edit-confirm-header h2 { font-size: 18px; } .edit-confirm-body { padding: 16px; } .edit-confirm-footer { padding: 14px 16px; } }

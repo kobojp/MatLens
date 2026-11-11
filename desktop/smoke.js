@@ -105,14 +105,67 @@
     change('input[placeholder="例如 3F、B2"]', '3F');
     change('input[placeholder="例如 M3-07"]', 'DESKTOP-QA');
     await wait(() => document.querySelector('.path-preview').textContent.includes('DESKTOP-QA'), 'edit');
+    [...document.querySelectorAll('.choice-value')].find(button => button.textContent === '火警').click();
+    await wait(() => document.querySelector('button[aria-label="新增火警細項選項"]'), 'show fire details');
+    document.querySelector('button[aria-label="新增火警細項選項"]').click();
+    await wait(() => document.querySelector('input[aria-label="自訂火警細項名稱"]'), 'show fire editor');
+    change('input[aria-label="自訂火警細項名稱"]', 'QA短路');
+    [...document.querySelectorAll('button')].find(button => button.textContent === '加入火警細項').click();
+    await wait(() => document.querySelector('button[aria-label="火警細項 QA短路"]')?.getAttribute('aria-pressed') === 'true', 'custom fire detail');
+    await wait(() => !document.querySelector('.fire-naming input').disabled, 'fire naming loaded');
+    document.querySelector('.fire-naming input').click();
+    await wait(async () => !(await (await fetch('/api/settings/fire-naming')).json()).include_material && !window.matlensDesktopState.saving, 'fire naming saved');
+    if (!document.querySelector('.path-preview').textContent.includes('DESKTOP-QA 火警 QA短路')) throw new Error('Fire naming preview differs');
     document.querySelector('button[form="case-form"]').click();
     await wait(() => document.querySelector('.message.success')?.textContent.includes('已安全儲存'), 'save');
     await wait(() => !window.matlensDesktopState.dirty && !window.matlensDesktopState.saving, 'clean state');
     await wait(() => document.querySelector('.row-actions button'), 'case list');
-    document.querySelector('.row-actions button').click();
+    [...document.querySelectorAll('.row-actions button')].find(button => button.textContent === '檢視').click();
     await wait(() => document.querySelectorAll('.saved-photo-grid img').length === 3, 'case detail');
     await wait(() => [...document.querySelectorAll('.saved-photo-grid img')].every(img => img.naturalWidth === 800), 'saved photos');
     document.querySelector('.case-modal > header button').click();
+    document.querySelector('.row-actions button[aria-label^="編輯案件"]').click();
+    await wait(() => document.querySelector('.workspace-edit-banner') && document.querySelector('input[placeholder="例如 M3-07"]')?.value === 'DESKTOP-QA', 'load existing workspace');
+    if (document.querySelector('.case-edit-modal')) throw new Error('Unexpected separate editor');
+    const beforeCase = (await (await fetch('/api/cases')).json()).items[0];
+    const beforeDetail = await (await fetch('/api/cases/' + beforeCase.id)).json();
+    change('input[placeholder="例如 M3-07"]', 'DESKTOP-EDIT-QA');
+    const select = document.querySelector('.thumbnail-item select');
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, '位置');
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    document.querySelector('.photo-rail').dispatchEvent(new DragEvent('drop', {
+      bubbles: true, cancelable: true, dataTransfer: transferFor('yellow', '更正新增.png'),
+    }));
+    await wait(() => document.querySelectorAll('.thumbnail-item').length === 4, 'add edit photo');
+    document.querySelectorAll('.thumbnail-item')[1].querySelector('.remove-photo').click();
+    await wait(() => document.querySelectorAll('.thumbnail-item').length === 3, 'remove edit photo');
+    document.querySelectorAll('.thumbnail-item')[2].querySelector('.move-photo button').click();
+    await wait(() => document.querySelectorAll('.thumbnail-item')[1].textContent.includes('更正新增.png'), 'reorder edit photo');
+    window.scrollTo(0, document.documentElement.scrollHeight);
+    document.querySelector('button[form="case-form"]').click();
+    await wait(() => document.querySelector('.edit-confirmation'), 'edit confirmation');
+    const dialog = document.querySelector('.edit-confirmation');
+    const rectangle = dialog.getBoundingClientRect();
+    const centered = Math.abs(rectangle.x + rectangle.width / 2 - innerWidth / 2) < 2 && Math.abs(rectangle.y + rectangle.height / 2 - innerHeight / 2) < 2;
+    const renameConfirmed = dialog.textContent.includes('DESKTOP-QA') && dialog.textContent.includes('DESKTOP-EDIT-QA') && dialog.textContent.includes('新增 1 張、移除 1 張');
+    if (!centered || !renameConfirmed || !window.matlensDesktopState.saving || document.body.style.overflow !== 'hidden') throw new Error('Edit confirmation is not centered/protected');
+    if (document.activeElement.textContent !== '取消') throw new Error('Confirmation initial focus incorrect');
+    dialog.querySelector('button').click();
+    await wait(() => !document.querySelector('.edit-confirmation') && !window.matlensDesktopState.saving, 'cancel edit confirmation');
+    if ((await (await fetch('/api/cases/' + beforeCase.id)).json()).address_code !== 'DESKTOP-QA') throw new Error('Cancel changed persisted case');
+    document.querySelector('button[form="case-form"]').click();
+    await wait(() => document.querySelector('.edit-confirmation'), 'reopen edit confirmation');
+    document.querySelector('.edit-confirm-footer .primary').click();
+    await wait(() => document.querySelector('.message.success')?.textContent.includes('案件更正已儲存') && !window.matlensDesktopState.saving, 'save workspace edit');
+    const afterCases = (await (await fetch('/api/cases')).json()).items;
+    if (!renameConfirmed || afterCases.length !== 1 || afterCases[0].id !== beforeCase.id || afterCases[0].address_code !== 'DESKTOP-EDIT-QA') throw new Error('Workspace edit created duplicate or wrong case');
+    const detail = await (await fetch('/api/cases/' + beforeCase.id)).json();
+    if (detail.photos.length !== 3 || detail.material !== '底座' || !detail.folder_path.includes('火警 QA短路')) throw new Error('Edit changed case/photo data');
+    if (detail.photos[0].id !== beforeDetail.photos[0].id || detail.photos[0].role !== '位置' || detail.photos.some(photo => photo.id === beforeDetail.photos[1].id)) throw new Error('Edit photo roles/identities incorrect');
+    for (const photo of detail.photos) if (!(await fetch(photo.content_url)).ok) throw new Error('Edited photo path unavailable');
+    [...document.querySelectorAll('.workspace-edit-actions button')].find(button => button.textContent === '取消編輯').click();
+    await wait(() => !document.querySelector('.workspace-edit-banner'), 'return to new workspace');
+
     document.querySelector('#tab-settings').click();
     [...document.querySelectorAll('button')].find(button => button.textContent === '恢復預設版面').click();
     await wait(async () => {
@@ -140,7 +193,7 @@
     const selection = await (await fetch('/api/settings/storage-selection')).json();
     if (selection.subfolder !== '底座' || selection.with_date !== false) throw new Error('Storage settings not persisted');
     if (!document.querySelector('.destination-badge')?.textContent.includes('目前儲存資料夾：底座')) throw new Error('Wrong destination badge');
-    return { ok: true, photos: 3, address: 'DESKTOP-QA', dirty: window.matlensDesktopState.dirty, portrait_fit: true, zoom_pan: true, update_panel, database_location: true, clipboard_confirmation: true, storage_selection: true, tile_workspace: true, lightbox: true, long_filenames: true, classic_switch: true, ui_reset: true, panel_collapse: true };
+    return { ok: true, photos: 3, address: 'DESKTOP-EDIT-QA', fire_details: true, fire_naming: true, case_edit: true, workspace_edit: true, saved_photo_changes: true, centered_edit_confirmation: true, dirty: window.matlensDesktopState.dirty, portrait_fit: true, zoom_pan: true, update_panel, database_location: true, clipboard_confirmation: true, storage_selection: true, tile_workspace: true, lightbox: true, long_filenames: true, classic_switch: true, ui_reset: true, panel_collapse: true };
   } catch (error) {
     return { ok: false, error: String(error), text: document.body.innerText };
   }

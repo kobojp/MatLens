@@ -36,11 +36,16 @@ def exercise_window(window, draft, result: dict, finished: threading.Event) -> N
                     " && document.querySelector('.destination-badge')?.textContent.includes('底座')"
                     " && document.querySelector('.workspace.layout-tiles.panel-top.tiles-medium')"
                     " && document.querySelector('#case-editor-fields')?.hidden"
-                    " && document.querySelector('.case-table')?.textContent.includes('DESKTOP-QA'))"
+                    " && document.querySelector('.case-table')?.textContent"
+                    ".includes('DESKTOP-EDIT-QA'))"
                 )
                 if restored:
                     result["settings_restored_after_reload"] = True
                     result["ui_preferences_restored"] = True
+                    result["fire_case_restored_after_reload"] = window.evaluate_js(
+                        "Boolean(document.querySelector('.case-table')?.textContent"
+                        ".includes('QA短路'))"
+                    )
                     break
                 time.sleep(0.1)
             else:
@@ -57,6 +62,23 @@ def exercise_window(window, draft, result: dict, finished: threading.Event) -> N
                     "r => ({name:r.name, size:r.transferSize}))})"
                 )
                 raise RuntimeError("Storage settings were not restored after reload")
+            window.evaluate_js("[...document.querySelectorAll('.choice-value')]"
+                               ".find(button => button.textContent === '火警').click(); true")
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                if window.evaluate_js(
+                    "Boolean(document.querySelector('.fire-naming input') && "
+                    "!document.querySelector('.fire-naming input').disabled && "
+                    "!document.querySelector('.fire-naming input').checked && "
+                    "document.querySelector('button[aria-label=\"火警細項 QA短路\"]'))"
+                ):
+                    result["fire_preferences_restored"] = True
+                    break
+                time.sleep(0.1)
+            else:
+                raise RuntimeError("Fire preferences were not restored after reload")
+            window.evaluate_js("[...document.querySelectorAll('.choice-value')]"
+                               ".find(button => button.textContent === '錯誤設備').click(); true")
             window.resize(1000, 760)
             deadline = time.monotonic() + 5
             while time.monotonic() < deadline:

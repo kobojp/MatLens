@@ -123,12 +123,20 @@ def refresh_case_from_folder(
     """
     if not isinstance(parsed, CaseCreate):
         return
+    saved = connection.execute(("SELECT metadata_authoritative, naming_json "
+         "FROM cases WHERE id=?"), (case_id,)).fetchone()
+    if saved and saved["metadata_authoritative"]:
+        return
     work_date = parsed.work_date.isoformat() if _DATED_NAME_RE.match(folder.name) else None
     material = (
         parsed.material
         if folder.parent != root or parsed.material != folder.parent.name
         else None
     )
+    if saved and saved["naming_json"]:
+        naming = json.loads(saved["naming_json"])
+        if parsed.issues[0] == "火警" and not naming.get("include_material", True):
+            material = None
     connection.execute(
         """
         UPDATE cases SET building = ?, floor = ?, address_code = ?, issues_json = ?,

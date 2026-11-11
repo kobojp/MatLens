@@ -7,6 +7,8 @@ export const FALLBACK_REFERENCES: ReferenceValues = {
   photo_roles: ["前", "中", "後", "完成", "樓層", "位置", "設備標籤", "其他"],
   custom_materials: [],
   custom_issues: [],
+  fire_details: ["錯誤設備", "無回應", "漏水", "自檢異常", "鏽蝕", "故障"],
+  custom_fire_details: [],
 };
 
 export function localDate(): string {
@@ -35,6 +37,18 @@ export function safeName(value: string): string {
   return value.replace(/[<>:"/\\|?*\x00-\x1f]/g, "-").replace(/\s+/g, " ").trim();
 }
 
+export function photoName(photo: PhotoDraft): string {
+  return photo.file?.name ?? photo.saved?.original_name ?? "照片";
+}
+
+export function releasePhotos(photos: PhotoDraft[]): void {
+  photos.forEach(photo => { if (photo.file) URL.revokeObjectURL(photo.url); });
+}
+
+export function photoSignature(photos: PhotoDraft[], sequence: boolean): string {
+  return JSON.stringify([sequence, photos.map(photo => [photo.id, photo.role])]);
+}
+
 export function roleFileNames(photos: PhotoDraft[], withSequence: boolean): string[] {
   const totals = new Map<string, number>();
   const seen = new Map<string, number>();
@@ -44,7 +58,7 @@ export function roleFileNames(photos: PhotoDraft[], withSequence: boolean): stri
     seen.set(photo.role, current);
     // 同角色多張：前-1、前-2、前-3；只有一張就只有角色名
     const suffix = totals.get(photo.role)! > 1 ? `-${current}` : "";
-    const extension = photo.file.name.split(".").pop()?.toLowerCase() || "jpg";
+    const extension = (photo.file?.name ?? photo.saved?.stored_name ?? "photo.jpg").split(".").pop()?.toLowerCase() || "jpg";
     const prefix = withSequence ? `${String(index + 1).padStart(2, "0")}_` : "";
     return `${prefix}${photo.role}${suffix}.${extension}`;
   });

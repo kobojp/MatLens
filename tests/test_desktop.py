@@ -24,7 +24,8 @@ def test_migration_preserves_original_and_is_idempotent(tmp_path: Path):
     with closing(sqlite3.connect(source)) as db, db:
         db.execute("INSERT INTO custom_options VALUES (1, 'issue', '測試問題', '2026-09-06')")
         db.execute(
-            """INSERT INTO cases VALUES (
+            """INSERT INTO cases (id,work_date,building,floor,address_code,material,issues_json,
+            location,notes,storage_root,folder_path,photo_count,created_at) VALUES (
             'old', '2026-09-06', '二門診', '3F', 'M3', '底座', '["漏水"]', '', '',
             '', '2026/09/old', 0, '2026-09-06')"""
         )

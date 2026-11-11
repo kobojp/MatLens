@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import PhotoPreview from "./PhotoPreview";
+import { photoName } from "./utils";
 import type { PhotoDraft } from "./types";
 
 export default function PhotoLightbox({ photos, selectedId, names, onSelect, onClose }: {
@@ -45,10 +46,10 @@ export default function PhotoLightbox({ photos, selectedId, names, onSelect, onC
           else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
         }
       }}>
-      <header><div><h2 id="lightbox-title">{photo.role}・{names[index]}</h2><p>{index + 1}／{photos.length} 張 · {photo.file.name}</p></div>
+      <header><div><h2 id="lightbox-title">{photo.role}・{names[index]}</h2><p>{index + 1}／{photos.length} 張 · {photoName(photo)}</p></div>
         <button type="button" className="lightbox-close" aria-label="關閉放大圖片" onClick={onClose}>×</button></header>
       <div className="lightbox-content"><button className="lightbox-prev" type="button" aria-label="上一張照片" disabled={index === 0} onClick={() => move(-1)}>‹</button>
-        <PhotoPreview key={photo.id} src={photo.url} alt={photo.file.name} />
+        <PhotoPreview key={photo.id} src={photo.url} alt={photoName(photo)} />
         <button className="lightbox-next" type="button" aria-label="下一張照片" disabled={index === photos.length - 1} onClick={() => move(1)}>›</button></div>
       <p className="lightbox-help">左右鍵換圖 · 滾輪縮放 · 拖曳移動 · Esc 關閉</p>
     </div>

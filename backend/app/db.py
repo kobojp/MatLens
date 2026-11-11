@@ -60,6 +60,11 @@ CREATE TABLE IF NOT EXISTS custom_options (
     UNIQUE(option_type, value)
 );
 
+CREATE TABLE IF NOT EXISTS fire_detail_options (
+    value TEXT PRIMARY KEY COLLATE NOCASE,
+    created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_custom_options_type
 ON custom_options(option_type, id);
 """
@@ -84,6 +89,27 @@ def initialize(database_path: Path) -> None:
         if "storage_root" not in case_columns:
             connection.execute(
                 "ALTER TABLE cases ADD COLUMN storage_root TEXT NOT NULL DEFAULT ''"
+            )
+        for name, definition in {
+            "edit_revision": "TEXT NOT NULL DEFAULT ''",
+            "app_managed": "INTEGER NOT NULL DEFAULT 0",
+            "naming_json": "TEXT NOT NULL DEFAULT ''",
+            "metadata_authoritative": "INTEGER NOT NULL DEFAULT 0",
+        }.items():
+            if name not in case_columns:
+                connection.execute(f"ALTER TABLE cases ADD COLUMN {name} {definition}")
+        if (
+            connection.execute(
+                "SELECT 1 FROM settings WHERE key='fire_details_migrated'"
+            ).fetchone()
+            is None
+        ):
+            connection.execute(
+                "INSERT OR IGNORE INTO fire_detail_options SELECT value, created_at "
+                "FROM custom_options WHERE option_type='issue' AND value != '火警'"
+            )
+            connection.execute(
+                "INSERT INTO settings(key,value) VALUES('fire_details_migrated','1')"
             )
         connection.execute("PRAGMA optimize")
 

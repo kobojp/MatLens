@@ -53,7 +53,7 @@ class OverviewCase:
 
 def case_title(building: str, floor: str, address_code: str, issues: list[str]) -> str:
     """與案件資料夾名稱相同的規則：棟別與樓層連寫，其餘以空白分隔。"""
-    return f"{building}{floor} {address_code} {'-'.join(issues)}"
+    return f"{building}{floor} {address_code} {' '.join(issues)}"
 
 
 def collect_from_database(

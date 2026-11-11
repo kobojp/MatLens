@@ -655,7 +655,7 @@ def test_scan_imports_material_from_new_case_folder_name(
     }).json()
     assert overview["total"] == 1
     assert overview["cases"][0]["material"] == "排煙風門馬達"
-    assert overview["cases"][0]["title"].endswith("M3-07 火警-無回應")
+    assert overview["cases"][0]["title"].endswith("M3-07 火警 無回應")
     scan = client.post("/api/cases/rescan", params={"path": str(root)}).json()
     assert scan["imported"] == 1
     case = client.get("/api/cases").json()["items"][0]
@@ -761,7 +761,7 @@ def test_fire_issue_accepts_one_detail_and_names_folder(
     assert response.status_code == 201
     created = response.json()
     assert created["issues"] == ["火警", "無回應"]
-    assert Path(created["folder_path"]).name == "2026-08-17 二門診3F M3-07 底座 火警-無回應"
+    assert Path(created["folder_path"]).name == "2026-08-17 二門診3F M3-07 底座 火警 無回應"
 
 
 def test_staging_folder_is_removed_after_save(client: TestClient, tmp_path: Path) -> None:
@@ -833,7 +833,7 @@ def test_overview_from_disk_lists_unregistered_folders_and_blocks_traversal(
 
     assert data["total"] == 1
     case = data["cases"][0]
-    assert case["title"] == "二門診1F M3-07 火警-無回應"
+    assert case["title"] == "二門診1F M3-07 火警 無回應"
     assert [photo["name"] for photo in case["photos"]] == ["01_前.jpg", "02_中.jpg"]
     assert client.get(case["photos"][0]["thumb_url"]).status_code == 200
     assert client.get(case["photos"][0]["url"]).status_code == 200

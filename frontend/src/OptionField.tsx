@@ -6,6 +6,7 @@ type Props = {
   noun: string;
   legend: string;
   single?: boolean;
+  optionPrefix?: string;
   items: string[];
   customItems: string[];
   isActive: (item: string) => boolean;
@@ -35,7 +36,7 @@ export default function OptionField(props: Props) {
           const active = props.isActive(item);
           return (
             <span key={item} className={`choice-option ${active ? "active" : ""}`}>
-              <button type="button" className="choice-value" aria-pressed={active} onClick={() => props.onSelect(item)}>{item}</button>
+              <button type="button" className="choice-value" aria-label={props.optionPrefix ? `${props.optionPrefix} ${item}` : undefined} aria-pressed={active} onClick={() => props.onSelect(item)}>{item}</button>
               {isCustom && (
                 <button
                   type="button"

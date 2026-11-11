@@ -5,11 +5,14 @@ export type ReferenceValues = {
   photo_roles: string[];
   custom_materials: string[];
   custom_issues: string[];
+  fire_details: string[];
+  custom_fire_details: string[];
 };
 
 export type PhotoDraft = {
   id: string;
-  file: File;
+  file: File | null;
+  saved?: SavedPhoto;
   url: string;
   role: string;
 };
@@ -39,6 +42,15 @@ export type CaseRecord = {
   photos?: SavedPhoto[];
 };
 
+export type EditableCase = CaseRecord & {
+  storage_root: string;
+  edit_token: string;
+  original_path: string;
+  name_with_sequence: boolean;
+  naming: { include_date: boolean; include_material: boolean; separator: string };
+  requires_managed_confirmation: boolean;
+};
+
 export type StorageMonth = {
   name: string;
   subfolders: string[];
@@ -58,7 +70,7 @@ export type FreeScanResult = {
 
 export type StorageMode = "month" | "free";
 
-export type CustomOptionKind = "material" | "issue";
+export type CustomOptionKind = "material" | "issue" | "fire-detail";
 
 export type OverviewPhoto = {
   name: string;

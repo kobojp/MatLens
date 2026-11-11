@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CaseListSection from "./CaseListSection";
 import CaseModal from "./CaseModal";
+import EditConfirmation from "./EditConfirmation";
+import type { EditPreview } from "./EditConfirmation";
+import useFireNaming from "./useFireNaming";
 import OptionField from "./OptionField";
 import OverviewModal from "./OverviewModal";
 import RoleOrderEditor from "./RoleOrderEditor";
@@ -15,6 +18,7 @@ import useClipboardImages from "./useClipboardImages";
 import PasteConfirmation from "./PasteConfirmation";
 import type {
   CaseRecord,
+  EditableCase,
   CustomOptionKind,
   PhotoDraft,
   ReferenceValues,
@@ -28,9 +32,26 @@ import {
   moveItem,
   roleFileNames,
   safeName,
+  photoName,
+  photoSignature,
+  releasePhotos,
 } from "./utils";
 
 export default function App() {
+  const [editing, setEditing] = useState<EditableCase | null>(null);
+  const [editLoading, setEditLoading] = useState(false);
+  const [editConfirmation, setEditConfirmation] = useState<EditPreview | null>(null);
+  const confirmationResolve = useRef<((confirmed: boolean) => void) | null>(null);
+  const saveButton = useRef<HTMLButtonElement>(null);
+  const [applyNewNaming, setApplyNewNaming] = useState(false);
+  const [editNaming, setEditNaming] = useState({ include_date: true, include_material: true });
+  const editRequest = useRef(0);
+  const cleanPhotoSignature = useRef("");
+  const newDraft = useRef<null | { fields: string; clean: string; photos: PhotoDraft[];
+    selected: string; sequence: boolean }>(null);
+  const fireNaming = useFireNaming();
+  const optionGeneration = useRef(0);
+  const issuesNow = useRef<string[]>([]);
   const [databasePath, setDatabasePath] = useState("");
   const [references, setReferences] = useState(FALLBACK_REFERENCES);
   const [photos, setPhotos] = useState<PhotoDraft[]>([]);
@@ -41,6 +62,7 @@ export default function App() {
   const [addressCode, setAddressCode] = useState("");
   const [material, setMaterial] = useState("底座");
   const [issues, setIssues] = useState<string[]>(["錯誤設備"]);
+  issuesNow.current = issues;
   const [location, setLocation] = useState("");
   const [notes, setNotes] = useState("");
   const [cases, setCases] = useState<CaseRecord[]>([]);
@@ -69,8 +91,8 @@ export default function App() {
   const topPanel = tiles && ui.value.panel_position === "top";
   const collapsed = topPanel && ui.value.panel_collapsed;
   const clipboard = useClipboardImages(photos.length,
-    updateInstalling || saving || page !== "workspace" || !!viewerId, setError);
-  const modalOpen = !!viewerId || clipboard.pending.length > 0;
+    updateInstalling || saving || page !== "workspace" || !!viewerId || editLoading, setError);
+  const modalOpen = !!viewerId || clipboard.pending.length > 0 || !!editConfirmation;
   const ignorePhotoClick = useRef(false);
   const expandingPanel = useRef(false);
   const [dragging, setDragging] = useState(false);
@@ -89,6 +111,12 @@ export default function App() {
   const draftFields = JSON.stringify({ workDate, building, floor, addressCode, material, issues, location, notes });
   const cleanFields = useRef(draftFields);
   const stateSequence = useRef(0);
+  const currentPhotoSignature = photoSignature(photos, nameWithSequence);
+  const backgroundDirty = !!newDraft.current && (newDraft.current.photos.length > 0 || newDraft.current.fields !== newDraft.current.clean);
+  const contentDirty = draftFields !== cleanFields.current || (editing
+    ? currentPhotoSignature !== cleanPhotoSignature.current || applyNewNaming
+    : photos.length > 0);
+
 
   useEffect(() => {
     const element = header.current;
@@ -102,8 +130,8 @@ export default function App() {
 
   useEffect(() => {
     window.matlensDesktopState = {
-      dirty: photos.length > 0 || draftFields !== cleanFields.current || storage.saveStatus.startsWith("儲存失敗") || ui.failed,
-      saving: saving || settingsSaving,
+      dirty: contentDirty || backgroundDirty || storage.saveStatus.startsWith("儲存失敗") || ui.failed || fireNaming.failed,
+      saving: saving || settingsSaving || fireNaming.saving || editLoading || savingCustomOption || !!deletingOption,
     };
     const sendState = () => {
       const state = window.matlensDesktopState!;
@@ -114,7 +142,7 @@ export default function App() {
     sendState();
     window.addEventListener("pywebviewready", sendState);
     return () => window.removeEventListener("pywebviewready", sendState);
-  }, [photos.length, draftFields, saving, settingsSaving, storage.saveStatus, ui.failed]);
+  }, [contentDirty, backgroundDirty, saving, settingsSaving, storage.saveStatus, ui.failed, fireNaming.failed, fireNaming.saving, editLoading, savingCustomOption, deletingOption]);
 
   useEffect(() => {
     const preventFileNavigation = (event: DragEvent) => event.preventDefault();
@@ -130,19 +158,27 @@ export default function App() {
   const selectedIndex = photos.findIndex((photo) => photo.id === selectedPhotoId);
   const selectedPhoto = selectedIndex >= 0 ? photos[selectedIndex] : photos[0];
   const generatedNames = useMemo(
-    () => roleFileNames(photos, nameWithSequence),
-    [photos, nameWithSequence],
+    () => editing && currentPhotoSignature === cleanPhotoSignature.current
+      ? photos.map(photo => photo.saved?.stored_name ?? "") : roleFileNames(photos, nameWithSequence),
+    [photos, nameWithSequence, editing, currentPhotoSignature],
   );
 
   const folderPreview = useMemo(() => {
     const buildingFloor = `${safeName(building)}${safeName(floor)}`;
-    const issueText = issues.map(safeName).join("-");
-    const parts = freeWithDate
-      ? [workDate, buildingFloor, addressCode, material, issueText]
-      : [buildingFloor, addressCode, material, issueText];
-    return `${freeSelectedSubfolder || "請選子目錄"}\\${parts.map(safeName).join(" ")}`;
-  }, [workDate, building, floor, addressCode, material, issues, freeSelectedSubfolder, freeWithDate]);
-
+    const naming = editing ? (applyNewNaming ? { ...editNaming, separator: " " } : editing.naming)
+      : { include_date: freeWithDate, include_material: fireNaming.includeMaterial, separator: " " };
+    const parent = editing ? editing.folder_path.replace(/\\/g, "/").split("/").slice(0, -1).join("\\") : freeSelectedSubfolder || "請選子目錄";
+    const unchanged = editing && !applyNewNaming && workDate === editing.work_date && building === editing.building
+      && floor === editing.floor && addressCode === editing.address_code && material === editing.material
+      && JSON.stringify(issues) === JSON.stringify(editing.issues);
+    if (unchanged) return editing.folder_path.replace(/\//g, "\\");
+    const issueText = issues.map(safeName).join(naming.separator);
+    const parts = [ ...(naming.include_date ? [workDate] : []), buildingFloor, addressCode,
+      ...(issues[0] !== "火警" || naming.include_material ? [material] : []), issueText ];
+    return [parent, parts.map(safeName).join(" ")].filter(Boolean).join("\\");
+  }, [workDate, building, floor, addressCode, material, issues, freeSelectedSubfolder, freeWithDate,
+      fireNaming.includeMaterial, editing, applyNewNaming, editNaming]);
+  const previewRoot = editing?.storage_root || storageRoot;
   const destinationSubfolder = freeSelectedSubfolder;
   const overviewDefaultMaterial = references.materials.includes(destinationSubfolder)
     ? destinationSubfolder
@@ -188,6 +224,8 @@ export default function App() {
     fetch("/api/reference-values")
       .then((response) => (response.ok ? response.json() : Promise.reject()))
       .then((payload: ReferenceValues) => setReferences((current) => ({
+        fire_details: payload.fire_details ?? current.fire_details,
+        custom_fire_details: payload.custom_fire_details ?? current.custom_fire_details,
         buildings: [...new Set([...payload.buildings, ...current.buildings])],
         materials: [...new Set([...payload.materials, ...current.materials])],
         issues: [...new Set([...payload.issues, ...current.issues])],
@@ -202,7 +240,10 @@ export default function App() {
       .catch(() => undefined);
     fetch("/api/settings/name-sequence")
       .then((response) => (response.ok ? response.json() : Promise.reject()))
-      .then((payload: { enabled: boolean }) => setNameWithSequence(Boolean(payload.enabled)))
+      .then((payload: { enabled: boolean }) => {
+        if (newDraft.current) newDraft.current.sequence = Boolean(payload.enabled);
+        else setNameWithSequence(Boolean(payload.enabled));
+      })
       .catch(() => undefined);
   }, []);
 
@@ -216,11 +257,11 @@ export default function App() {
   }, [photos]);
 
   useEffect(() => {
-    return () => latestPhotos.current.forEach((photo) => URL.revokeObjectURL(photo.url));
+    return () => { releasePhotos(latestPhotos.current); if (newDraft.current) releasePhotos(newDraft.current.photos); ++editRequest.current; confirmationResolve.current?.(false); confirmationResolve.current = null; };
   }, []);
 
   function addFiles(fileList: FileList | File[]) {
-    if (updateInstalling) return;
+    if (updateInstalling || saving || editLoading) return;
     setError("");
     const accepted = Array.from(fileList).filter((file) =>
       ["image/jpeg", "image/png", "image/webp"].includes(file.type),
@@ -236,7 +277,7 @@ export default function App() {
     }
     const defaults = initialRoles(combinedCount, roleOrder);
     const currentDefaults = initialRoles(photos.length, roleOrder);
-    const rolesAreAutomatic = photos.every(
+    const rolesAreAutomatic = !editing && photos.every(
       (photo, index) => photo.role === currentDefaults[index],
     );
     const additions = accepted.map((file, index) => ({
@@ -276,7 +317,7 @@ export default function App() {
 
   function removePhoto(id: string) {
     const target = photos.find((photo) => photo.id === id);
-    if (target) URL.revokeObjectURL(target.url);
+    if (target) releasePhotos([target]);
     const remaining = photos.filter((photo) => photo.id !== id);
     setPhotos(remaining);
     if (selectedPhotoId === id) setSelectedPhotoId(remaining[0]?.id ?? "");
@@ -288,7 +329,7 @@ export default function App() {
 
   function clearDraft() {
     cleanFields.current = JSON.stringify({ workDate, building, floor: "", addressCode: "", material, issues, location: "", notes: "" });
-    photos.forEach((photo) => URL.revokeObjectURL(photo.url));
+    releasePhotos(photos);
     setPhotos([]);
     setSelectedPhotoId("");
     setViewerId("");
@@ -301,7 +342,9 @@ export default function App() {
 
   async function saveCase(event: React.FormEvent) {
     event.preventDefault();
-    if (updateInstalling) return;
+    if (updateInstalling || saving || editLoading) return;
+    if (editing) { await saveEditedCase(); return; }
+    if (issues[0] === "火警" && (!fireNaming.ready || fireNaming.saving || fireNaming.failed)) { setError("請先完成火警命名設定保存，失敗時請重試。"); return; }
     setError("");
     setNotice("");
     if (!photos.length || !floor.trim() || !addressCode.trim()) {
@@ -324,17 +367,18 @@ export default function App() {
     form.set("location", location);
     form.set("notes", notes);
     form.set("photo_roles", JSON.stringify(photos.map((photo) => photo.role)));
+    form.set("fire_include_material", String(fireNaming.includeMaterial));
     form.set("name_with_sequence", nameWithSequence ? "true" : "false");
     form.set("storage_month", "");
     form.set("storage_subfolder", freeSelectedSubfolder);
     form.set("free_scan_root", storage.result!.root);
     form.set("free_with_date", freeWithDate ? "true" : "false");
-    photos.forEach((photo) => form.append("photos", photo.file, photo.file.name));
+    photos.forEach((photo) => { if (photo.file) form.append("photos", photo.file, photoName(photo)); });
     try {
       const response = await fetch("/api/cases", { method: "POST", body: form });
       const payload = await response.json();
       if (!response.ok) throw new Error(errorText(payload));
-      setNotice("案件與照片已安全儲存。");
+      setNotice(`案件與照片已安全儲存。資料夾：${payload.folder_path || "請於清冊檢視實際位置"}`);
       clearDraft();
       if (casePage === 1) {
         await loadCases();
@@ -348,6 +392,117 @@ export default function App() {
     }
   }
 
+
+  function applyFields(fields: { workDate: string; building: string; floor: string; addressCode: string;
+    material: string; issues: string[]; location: string; notes: string }) {
+    setWorkDate(fields.workDate); setBuilding(fields.building); setFloor(fields.floor);
+    setAddressCode(fields.addressCode); setMaterial(fields.material); setIssues(fields.issues);
+    setLocation(fields.location); setNotes(fields.notes);
+  }
+
+  function applyEditedCase(record: EditableCase) {
+    const loaded: PhotoDraft[] = (record.photos || []).map(photo => ({
+      id: photo.id, file: null, saved: photo, url: `${photo.content_url}?edit=${record.edit_token}`, role: photo.role,
+    }));
+    const fields = { workDate: record.work_date, building: record.building, floor: record.floor,
+      addressCode: record.address_code, material: record.material, issues: record.issues,
+      location: record.location, notes: record.notes };
+    cleanFields.current = JSON.stringify(fields);
+    cleanPhotoSignature.current = photoSignature(loaded, record.name_with_sequence);
+    setEditing(record); applyFields(fields); setPhotos(loaded); setNameWithSequence(record.name_with_sequence);
+    setSelectedPhotoId(current => loaded.some(photo => photo.id === current) ? current : loaded[0]?.id || "");
+    setApplyNewNaming(false); setEditNaming(record.naming); setViewerId("");
+    setCustomOptionKind(null); ++optionGeneration.current;
+    if (fileInput.current) fileInput.current.value = "";
+  }
+
+  function restoreNewDraft() {
+    const snapshot = newDraft.current;
+    if (snapshot) {
+      applyFields(JSON.parse(snapshot.fields)); cleanFields.current = snapshot.clean;
+      setPhotos(snapshot.photos); setSelectedPhotoId(snapshot.selected); setNameWithSequence(snapshot.sequence);
+    }
+    newDraft.current = null; setEditing(null); setApplyNewNaming(false); setViewerId("");
+    setCustomOptionKind(null); ++optionGeneration.current;
+    if (fileInput.current) fileInput.current.value = "";
+  }
+
+  async function startEditing(id: string) {
+    if (saving || updateInstalling || editLoading) return;
+    if (editing && contentDirty && !window.confirm("放棄目前尚未儲存的更正並重新載入案件？")) return;
+    if (!newDraft.current) newDraft.current = { fields: draftFields, clean: cleanFields.current,
+      photos, selected: selectedPhotoId, sequence: nameWithSequence };
+    const request = ++editRequest.current;
+    setEditLoading(true); setError(""); setNotice(""); setPage("workspace");
+    try {
+      const response = await fetch(`/api/cases/${id}/edit`);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(errorText(payload));
+      if (request !== editRequest.current) return;
+      if (editing) releasePhotos(photos);
+      applyEditedCase(payload);
+      if (collapsed) ui.update({ panel_collapsed: false });
+      requestAnimationFrame(() => document.querySelector(".workspace-edit-banner")?.scrollIntoView?.({ block: "start", behavior: "smooth" }));
+    } catch (cause) {
+      if (request !== editRequest.current) return;
+      if (!editing) restoreNewDraft();
+      setError(cause instanceof Error ? cause.message : "無法載入案件。");
+    } finally { if (request === editRequest.current) setEditLoading(false); }
+  }
+
+  function endEditing() {
+    if (saving) return;
+    if (editing && contentDirty && !window.confirm("放棄本次未儲存的更正？已儲存的案件不受影響。")) return;
+    ++editRequest.current; setEditLoading(false);
+    if (editing) releasePhotos(photos);
+    restoreNewDraft(); setError("");
+  }
+
+  async function saveEditedCase() {
+    if (!editing || editLoading || saving) return;
+    if (!photos.length || !floor.trim() || !addressCode.trim()) {
+      setError("請至少保留一張照片，並填寫樓層與定址碼。"); return;
+    }
+    const uploads: File[] = [];
+    const selection = photos.map(photo => photo.saved
+      ? { photo_id: photo.saved.id, role: photo.role }
+      : { upload_index: uploads.push(photo.file!) - 1, role: photo.role });
+    const change = { work_date: workDate, building, floor, address_code: addressCode, material,
+      issues, location, notes, token: editing.edit_token, apply_naming: applyNewNaming,
+      include_material: editNaming.include_material, include_date: editNaming.include_date,
+      name_with_sequence: nameWithSequence, photos: selection, confirm_managed: false };
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const preview = await fetch(`/api/cases/${editing.id}/edit-preview`, { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(change) });
+      const plan = await preview.json();
+      if (!preview.ok) throw new Error(errorText(plan));
+      if (plan.rename || plan.photos_changed) {
+        const confirmed = await new Promise<boolean>(resolve => {
+          confirmationResolve.current = resolve; setEditConfirmation(plan);
+        });
+        if (!confirmed) return;
+        change.confirm_managed = true;
+      }
+      const form = new FormData(); form.set("change", JSON.stringify(change));
+      uploads.forEach(file => form.append("photos", file, file.name));
+      const response = await fetch(`/api/cases/${editing.id}/save`, { method: "POST", body: form });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(errorText(payload));
+      releasePhotos(photos); applyEditedCase(payload);
+      setNotice(payload.edit_warning || `案件更正已儲存。${payload.photo_backup ? "原照片已保留備份。" : ""}資料夾：${payload.folder_path}`);
+      await loadCases();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "案件更正儲存失敗。"); }
+    finally {
+      setSaving(false);
+      requestAnimationFrame(() => saveButton.current?.focus({ preventScroll: true }));
+    }
+  }
+
+  function chooseEditConfirmation(confirmed: boolean) {
+    const resolve = confirmationResolve.current;
+    confirmationResolve.current = null; setEditConfirmation(null); resolve?.(confirmed);
+  }
 
   async function viewCase(id: string) {
     setError("");
@@ -426,6 +581,7 @@ export default function App() {
 
   function changeNameSequence(enabled: boolean) {
     setNameWithSequence(enabled);
+    if (editing) return;
     fetch("/api/settings/name-sequence", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -439,6 +595,7 @@ export default function App() {
       setError("請輸入自訂選項名稱。");
       return;
     }
+    const generation = optionGeneration.current;
     setError("");
     setSavingCustomOption(true);
     try {
@@ -458,6 +615,8 @@ export default function App() {
         issues: kind === "issue"
           ? [...new Set([...current.issues, savedValue])]
           : current.issues,
+        fire_details: kind === "fire-detail" ? [...new Set([...current.fire_details, savedValue])] : current.fire_details,
+        custom_fire_details: kind === "fire-detail" ? [...new Set([...current.custom_fire_details, savedValue])] : current.custom_fire_details,
         custom_materials: kind === "material"
           ? [...new Set([...current.custom_materials, savedValue])]
           : current.custom_materials,
@@ -465,14 +624,13 @@ export default function App() {
           ? [...new Set([...current.custom_issues, savedValue])]
           : current.custom_issues,
       }));
-      if (kind === "material") {
-        setMaterial(savedValue);
-      } else {
-        setIssues([savedValue]);
+      if (generation === optionGeneration.current) {
+        if (kind === "material") setMaterial(savedValue);
+        else if (kind === "issue") setIssues([savedValue]);
+        else if (issuesNow.current[0] === "火警") setIssues(["火警", savedValue]);
+        setCustomOptionKind(null); setCustomOptionValue("");
       }
-      setCustomOptionKind(null);
-      setCustomOptionValue("");
-      setNotice(`${kind === "material" ? "材料" : "問題"}選項已新增。`);
+      setNotice(`${kind === "material" ? "材料" : kind === "issue" ? "問題" : "火警細項"}選項已新增。`);
     } catch (optionError) {
       setError(optionError instanceof Error ? optionError.message : "新增選項失敗。");
     } finally {
@@ -481,13 +639,14 @@ export default function App() {
   }
 
   function startCustomOption(kind: CustomOptionKind) {
+    ++optionGeneration.current;
     setCustomOptionKind(kind);
     setCustomOptionValue("");
     setError("");
   }
 
   async function deleteCustomOption(kind: CustomOptionKind, value: string) {
-    const label = kind === "material" ? "材料" : "問題";
+    const label = kind === "material" ? "材料" : kind === "issue" ? "問題" : "火警細項";
     if (!window.confirm(`確定刪除自訂${label}「${value}」？\n已儲存案件不受影響。`)) return;
     setError("");
     setDeletingOption(`${kind}:${value}`);
@@ -503,17 +662,20 @@ export default function App() {
         ...current,
         materials: kind === "material" ? current.materials.filter((item) => item !== value) : current.materials,
         issues: kind === "issue" ? current.issues.filter((item) => item !== value) : current.issues,
+        fire_details: kind === "fire-detail" ? current.fire_details.filter(item => item !== value) : current.fire_details,
+        custom_fire_details: kind === "fire-detail" ? current.custom_fire_details.filter(item => item !== value) : current.custom_fire_details,
         custom_materials: kind === "material" ? current.custom_materials.filter((item) => item !== value) : current.custom_materials,
         custom_issues: kind === "issue" ? current.custom_issues.filter((item) => item !== value) : current.custom_issues,
       }));
       if (kind === "material" && material === value) {
         setMaterial(references.materials.find((item) => item !== value) ?? "");
       }
+      if (kind === "fire-detail") setIssues(current => current[0] === "火警" && current[1] === value ? ["火警"] : current);
       if (kind === "issue") {
         setIssues((current) => (
           current[0] === value
             ? [references.issues.find((item) => item !== value) ?? ""]
-            : current.filter((item) => item !== value)
+            : current
         ));
       }
       setNotice(`自訂${label}「${value}」已刪除。`);
@@ -534,7 +696,9 @@ export default function App() {
             </div>
             {collapsed && <p className="case-summary">{building}{floor || "（未填樓層）"} · {addressCode || "未填定址碼"} · {material || "未選材料"}</p>}
             <div id="case-editor-fields" className="editor-fields" hidden={collapsed}>
-            <StorageDestination storage={storage} />
+            {editing ? <div className="edit-storage-card"><strong>此案件儲存位置（固定）</strong>
+              <code>{editing.original_path}</code><small>沿用此案原目錄，取消編輯後還原新增案件的儲存設定。</small></div>
+              : <StorageDestination storage={storage} />}
 
             <div className="field-grid">
               <label><span>維修日期</span><input type="date" value={workDate} onChange={(event) => setWorkDate(event.target.value)} required /></label>
@@ -550,7 +714,7 @@ export default function App() {
               noun="材料"
               legend="材料"
               single
-              items={references.materials}
+              items={editing ? [...new Set([material, ...references.materials])] : references.materials}
               customItems={references.custom_materials}
               isActive={(item) => material === item}
               onSelect={setMaterial}
@@ -561,7 +725,7 @@ export default function App() {
               onStartAdd={() => startCustomOption("material")}
               onEditorChange={setCustomOptionValue}
               onAdd={() => addCustomOption("material")}
-              onCancel={() => setCustomOptionKind(null)}
+              onCancel={() => { ++optionGeneration.current; setCustomOptionKind(null); }}
               onDelete={(item) => deleteCustomOption("material", item)}
             />
 
@@ -570,10 +734,10 @@ export default function App() {
               noun="問題"
               legend="問題"
               single
-              items={references.issues}
+              items={editing ? [...new Set([issues[0], ...references.issues])] : references.issues}
               customItems={references.custom_issues}
               isActive={(item) => issues[0] === item}
-              onSelect={(item) => setIssues([item])}
+              onSelect={(item) => { ++optionGeneration.current; setCustomOptionKind(null); setIssues([item]); }}
               deletingOption={deletingOption}
               editing={customOptionKind === "issue"}
               editorValue={customOptionValue}
@@ -581,31 +745,20 @@ export default function App() {
               onStartAdd={() => startCustomOption("issue")}
               onEditorChange={setCustomOptionValue}
               onAdd={() => addCustomOption("issue")}
-              onCancel={() => setCustomOptionKind(null)}
+              onCancel={() => { ++optionGeneration.current; setCustomOptionKind(null); }}
               onDelete={(item) => deleteCustomOption("issue", item)}
             />
 
 
             {issues[0] === "火警" && (
-              <fieldset>
-                <legend className="option-legend"><span>火警細項（單選，可不選）</span></legend>
-                <div className="choices single-choice">
-                  {references.issues.filter((item) => item !== "火警").map((item) => {
-                    const active = issues[1] === item;
-                    return (
-                      <span key={item} className={`choice-option ${active ? "active" : ""}`}>
-                        <button
-                          type="button"
-                          className="choice-value"
-                          aria-pressed={active}
-                          aria-label={`火警細項 ${item}`}
-                          onClick={() => setIssues(active ? ["火警"] : ["火警", item])}
-                        >{item}</button>
-                      </span>
-                    );
-                  })}
-                </div>
-              </fieldset>
+              <OptionField kind="fire-detail" noun="火警細項" legend="火警細項（單選，可不選）" optionPrefix="火警細項" single
+                items={editing && issues[1] ? [...new Set([issues[1], ...references.fire_details])] : references.fire_details} customItems={references.custom_fire_details}
+                isActive={item => issues[1] === item}
+                onSelect={item => { ++optionGeneration.current; setIssues(issues[1] === item ? ["火警"] : ["火警", item]); }}
+                deletingOption={deletingOption} editing={customOptionKind === "fire-detail"} editorValue={customOptionValue}
+                saving={savingCustomOption} onStartAdd={() => startCustomOption("fire-detail")} onEditorChange={setCustomOptionValue}
+                onAdd={() => addCustomOption("fire-detail")} onCancel={() => { ++optionGeneration.current; setCustomOptionKind(null); }}
+                onDelete={item => deleteCustomOption("fire-detail", item)} />
             )}
 
             <label className="notes-field"><span>備註</span><textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="可記錄漏水原因、缺照原因或其他說明" /></label>
@@ -620,7 +773,7 @@ export default function App() {
 
   return (
     <div className={`app-shell ${tiles ? "theme-blue" : "theme-classic"}`}>
-      <header ref={header} className="topbar" inert={updateInstalling || modalOpen}>
+      <header ref={header} className="topbar" inert={updateInstalling || modalOpen || saving || editLoading}>
         <div className="brand-block">
           <div className="brand-mark">ML</div>
           <div>
@@ -637,8 +790,8 @@ export default function App() {
             disabled={clipboard.reading || clipboard.pending.length > 0 || saving}>
             {clipboard.reading ? "讀取剪貼簿…" : "貼上圖片"}
           </button>}
-          <button className="button primary" type="submit" form="case-form" disabled={page !== "workspace" || saving || !storage.valid || clipboard.pending.length > 0}>
-            {saving ? "儲存中…" : "儲存案件"}
+          <button ref={saveButton} className="button primary" type="submit" form="case-form" disabled={page !== "workspace" || saving || editLoading || (!editing && !storage.valid) || clipboard.pending.length > 0}>
+            {saving ? "儲存中…" : editing ? "儲存變更" : "儲存案件"}
           </button>
         </div>
         <nav className="workspace-nav" role="tablist" aria-label="主頁籤" onKeyDown={event => {
@@ -656,11 +809,11 @@ export default function App() {
 
       <div inert={modalOpen}><UpdatePanel onInstalling={setUpdateInstalling} /></div>
 
-      <div className={`storage-bar ${storage.valid ? "has-destination" : "needs-destination"}`} inert={updateInstalling || modalOpen}>
+      <div className={`storage-bar ${editing || storage.valid ? "has-destination" : "needs-destination"}`} inert={updateInstalling || modalOpen || saving || editLoading || !!editing}>
         <strong className="destination-badge" role="status">
-          {storage.valid ? `目前儲存資料夾：${freeSelectedSubfolder}` : "尚未確認儲存資料夾"}
+          {editing ? "目前編輯案件原資料夾" : storage.valid ? `目前儲存資料夾：${freeSelectedSubfolder}` : "尚未確認儲存資料夾"}
         </strong>
-        <code title={storage.destination || storage.path}>{storage.destination || storage.path || "請選擇照片根目錄"}</code>
+        <code title={editing?.original_path || storage.destination || storage.path}>{editing?.original_path || storage.destination || storage.path || "請選擇照片根目錄"}</code>
         <button type="button" onClick={() => void storage.choose()} disabled={storage.loading}>
           選擇目錄
         </button>
@@ -673,12 +826,21 @@ export default function App() {
         </div>
       )}
 
-      <main id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden={page !== "settings"} inert={updateInstalling || modalOpen}>
+      <main id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden={page !== "settings"} inert={updateInstalling || modalOpen || saving || editLoading}>
         <UISettings preferences={ui} />
       </main>
-      <main id="panel-workspace" role="tabpanel" aria-labelledby="tab-workspace" hidden={page !== "workspace"} inert={updateInstalling || modalOpen}>
+      <main id="panel-workspace" role="tabpanel" aria-labelledby="tab-workspace" hidden={page !== "workspace"} inert={updateInstalling || modalOpen || saving}>
+        {(editing || editLoading) && <section className="workspace-edit-banner" aria-label="編輯模式">
+          <div><strong>{editLoading ? "載入既有案件中…" : `正在編輯：${editing!.building}${editing!.floor} ${editing!.address_code}`}</strong>
+            <p>欄位與照片已載入目前工作區，可修改、增減照片、排序及調整角色；儲存會更新同一筆案件。</p>
+            {backgroundDirty && <p>原新增草稿已暫存，取消編輯後可接續；關閉前仍需處理未儲存內容。</p>}
+            {editing && <code>{editing.original_path}</code>}</div>
+          <div className="workspace-edit-actions"><button className="button secondary" type="button" disabled={saving || editLoading}
+            onClick={() => { if (editing) void startEditing(editing.id); }}>重新載入案件</button>
+            <button className="button secondary" type="button" disabled={saving} onClick={() => endEditing()}>取消編輯</button></div>
+        </section>}
         {ui.error && <p role="alert" className="preferences-error">{ui.error} 請開啟設定頁重試。</p>}
-        <form id="case-form" className={`workspace layout-${ui.value.layout} panel-${tiles ? ui.value.panel_position : "right"} tiles-${ui.value.tile_size}`}
+        <form id="case-form" inert={editLoading} className={`workspace layout-${ui.value.layout} panel-${tiles ? ui.value.panel_position : "right"} tiles-${ui.value.tile_size}`}
           onSubmit={saveCase} onInvalidCapture={event => {
             if (!collapsed) return;
             event.preventDefault();
@@ -752,25 +914,25 @@ export default function App() {
                       endPhotoDrag();
                     }}
                   >
-                    <button type="button" className="thumbnail-button" aria-label={tiles ? `放大 ${photo.file.name}` : undefined}
+                    <button type="button" className="thumbnail-button" aria-label={tiles ? `放大 ${photoName(photo)}` : undefined}
                       onClick={event => {
                         if (ignorePhotoClick.current || draggedPhoto.current) return;
                         setSelectedPhotoId(photo.id);
                         if (tiles) { event.currentTarget.focus({ preventScroll: true }); setViewerId(photo.id); }
                       }}>
-                      <img src={photo.url} alt={`${photo.role}：${photo.file.name}`} draggable={false} />
-                      <span className="thumbnail-copy"><strong>{photo.role}</strong><small>{photo.file.name}</small></span>
+                      <img src={photo.url} alt={`${photo.role}：${photoName(photo)}`} draggable={false} />
+                      <span className="thumbnail-copy"><strong>{photo.role}</strong><small>{photoName(photo)}</small></span>
                     </button>
                     {tiles && <div className="tile-footer">
-                      <select aria-label={`${photo.file.name} 的角色`} value={photo.role} onChange={event => setPhotoRole(photo.id, event.target.value)}>
+                      <select aria-label={`${photoName(photo)} 的角色`} value={photo.role} onChange={event => setPhotoRole(photo.id, event.target.value)}>
                         {references.photo_roles.map(role => <option key={role}>{role}</option>)}
                       </select><code title={generatedNames[index]}>{generatedNames[index]}</code>
                     </div>}
-                    <button type="button" className="remove-photo" aria-label={`移除 ${photo.file.name}`} onClick={() => removePhoto(photo.id)}>×</button>
+                    <button type="button" className="remove-photo" aria-label={`移除 ${photoName(photo)}`} onClick={() => removePhoto(photo.id)}>×</button>
                     <span className="photo-number">{String(index + 1).padStart(2, "0")}</span>
                     <span className="move-photo">
-                      <button type="button" aria-label={`將 ${photo.file.name} 往前移`} disabled={index === 0} onClick={() => movePhoto(index, index - 1)}>◀</button>
-                      <button type="button" aria-label={`將 ${photo.file.name} 往後移`} disabled={index === photos.length - 1} onClick={() => movePhoto(index, index + 1)}>▶</button>
+                      <button type="button" aria-label={`將 ${photoName(photo)} 往前移`} disabled={index === 0} onClick={() => movePhoto(index, index - 1)}>◀</button>
+                      <button type="button" aria-label={`將 ${photoName(photo)} 往後移`} disabled={index === photos.length - 1} onClick={() => movePhoto(index, index + 1)}>▶</button>
                     </span>
                   </div>
                 ))}
@@ -795,7 +957,7 @@ export default function App() {
             </div>
             {!tiles && <>
             {selectedPhoto ? (
-              <PhotoPreview key={selectedPhoto.id} src={selectedPhoto.url} alt={selectedPhoto.file.name} />
+              <PhotoPreview key={selectedPhoto.id} src={selectedPhoto.url} alt={photoName(selectedPhoto)} />
             ) : (
               <div className="image-stage">
                 <div className="empty-preview"><span>尚未匯入照片</span><small>照片會在這裡放大預覽</small></div>
@@ -819,10 +981,29 @@ export default function App() {
               />
               檔名加上序號（01_、02_…）
             </label>
+            {editing && <div className="edit-naming-options">
+              <label><input type="checkbox" checked={applyNewNaming} onChange={event => {
+                setApplyNewNaming(event.target.checked); if (!event.target.checked) setEditNaming(editing.naming);
+              }} />本案套用新版命名（空白分隔）</label>
+              <label><input type="checkbox" checked={applyNewNaming ? editNaming.include_date : editing.naming.include_date}
+                onChange={event => { setApplyNewNaming(true); setEditNaming(current => ({ ...current, include_date: event.target.checked })); }} />本案名稱包含日期</label>
+              <small>預設保留此案原命名方式；變更後先確認原／新路徑，不影響新增案件的預設設定。</small>
+            </div>}
+            {issues[0] === "火警" && <div className="fire-naming">
+              <label><input type="checkbox" checked={editing ? (applyNewNaming ? editNaming.include_material : editing.naming.include_material) : fireNaming.includeMaterial}
+                disabled={!editing && !fireNaming.ready} onChange={event => {
+                  if (editing) { setApplyNewNaming(true); setEditNaming(current => ({ ...current, include_material: event.target.checked })); }
+                  else fireNaming.save(event.target.checked);
+                }} />火警資料夾名稱包含材料</label>
+              <small>{editing ? "調整本案名稱，材料資料與原儲存目錄不變。" : "只調整新案件名稱，材料資料及上層資料夾不變。"}</small>
+              {!editing && <><p role={fireNaming.failed || !fireNaming.ready ? "alert" : "status"}>{fireNaming.status}</p>
+                {fireNaming.failed && <button type="button" onClick={fireNaming.retry}>重試火警命名設定</button>}
+                {!fireNaming.ready && <button type="button" onClick={() => void fireNaming.reload()}>重新讀取火警命名設定</button>}</>}
+            </div>}
             <div className="path-preview">
               <span>案件資料夾</span>
               <code>{folderPreview}</code>
-              {storageRoot && <small>{storageRoot}{"\\"}{folderPreview}</small>}
+              {previewRoot && <small>{previewRoot}{"\\"}{folderPreview}</small>}
             </div>
           </section>
 
@@ -848,11 +1029,15 @@ export default function App() {
           onPageChange={setCasePage}
           onRescan={rescanCases}
           onOpenOverview={setOverviewView}
+          onEdit={id => { void startEditing(id); }}
+          editingDisabled={saving || editLoading}
+          rescanDisabled={!!editing || editLoading}
           onView={viewCase}
           onOpenFolder={openFolder}
         />
       </main>
 
+      {editConfirmation && <EditConfirmation plan={editConfirmation} returnFocus={saveButton.current} onChoose={chooseEditConfirmation} />}
       {viewerId && photos.length > 0 && <PhotoLightbox photos={photos} selectedId={viewerId} names={generatedNames}
         onSelect={id => { setViewerId(id); setSelectedPhotoId(id); }} onClose={() => setViewerId("")} />}
       {overviewView && (
