@@ -86,3 +86,12 @@ T-019 重打安裝包後的報告以本輪檔名區分：`build/exe-confirm-moda
 `build/upgrade-confirm-modal-installed.json`、`build/update-failure-confirm-modal.json`、
 `build/local-audit-confirm-modal.json`，主專案啟動腳本報告為該專案的 `build/main-confirm-modal.json`。
 本輪來源、打包及主專案自測另外檢查 `centered_edit_confirmation`，不沿用前次主工作區修正的證據。
+
+## 發布檢查補修依賴安全告警
+
+推送準備版後，GitHub 回報原 lockfile 的既有安全告警，包含 Pillow 與 certifi 的重大告警。
+公開前保留原草稿與附件紀錄、撤下尚未公開的草稿，更新 Pillow 至 13.0.0、certifi 至 2026.10.23、
+setuptools 至 84.2.1，以及 Vite／Vitest 與受影響前端間接依賴；不改變資料相容性版本。
+重新執行 199 項 pytest、72 項 Vitest、Ruff 及前端建置，npm audit 為零告警。
+新安裝包使用更新後依賴重新打包，來源／EXE／安裝與升級報告以 `release-0.5.7-secure-*` 區分，
+正式附件不沿用補修前的二進位檔或簽章。

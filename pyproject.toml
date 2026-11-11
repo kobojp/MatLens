@@ -7,7 +7,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "cryptography>=50.0.1",
     "fastapi",
-    "pillow",
+    "pillow>=13.0.0",
     "python-multipart",
     "pywebview>=6.2.1",
     "uvicorn[standard]",
